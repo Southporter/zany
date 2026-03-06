@@ -20,12 +20,15 @@
             .url = "git+https://codeberg.org/river/river#24ace530c102c0e4c9cfc835f77a86cb080ec2ba",
             .hash = "river-0.4.0-dev-_G6NjhpUCwCqEZssUDqs-kGSLCvKRlb_7_eI7S-LKckH",
         },
+        .cova = .{
+            .url = "git+https://github.com/00JCIV00/cova#a6c0e039f1f3f1cac1b661a19cbd62e08f7c30b9",
+            .hash = "cova-0.10.1-_OE4R2GzBADgtxZ-18SYW3tXUiKfQp6fdshEAPfg-yiq",
+        },
     },
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "src",
-        // For example...
         "LICENSE",
         "README.md",
     },

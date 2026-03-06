@@ -5,6 +5,13 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const awesome_lua_lib_path = b.option([]const u8, "awesome_lib", "Path to awesome lua lib (i.e. /usr/share/awesome/lib)") orelse "/usr/share/awesome/lib";
+    const zany_lua_lib_path = b.option([]const u8, "lib", "Path to zany lua lib (i.e. /usr/share/zany/lib)") orelse "/usr/share/zany/lib";
+
+    const options = b.addOptions();
+    options.addOption([]const u8, "awesome_lua_lib", awesome_lua_lib_path);
+    options.addOption([]const u8, "zany_lua_lib", zany_lua_lib_path);
+
     const river = b.dependency("river", .{});
 
     const scanner = Scanner.create(b, .{});
@@ -34,13 +41,20 @@ pub fn build(b: *std.Build) void {
 
     const ziglua = b.dependency("zlua", .{});
 
-    const mod = b.addModule("zanywm", .{ .root_source_file = b.path("src/root.zig"), .target = target, .imports = &.{
-        .{ .name = "lua", .module = ziglua.module("zlua") },
-        .{ .name = "wayland", .module = wayland },
-    } });
+    const mod = b.addModule("zanywm", .{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .imports = &.{
+            .{ .name = "lua", .module = ziglua.module("zlua") },
+            .{ .name = "wayland", .module = wayland },
+        },
+        .link_libc = true,
+    });
+    mod.addOptions("options", options);
+    mod.linkSystemLibrary("wayland-client", .{});
 
     const exe = b.addExecutable(.{
-        .name = "zanywm",
+        .name = "zany",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
@@ -49,9 +63,17 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "zanywm", .module = mod },
             },
         }),
+        .use_llvm = true,
     });
 
     b.installArtifact(exe);
+    b.installDirectory(.{
+        .install_dir = .lib,
+        .source_dir = awesome_lua,
+        .install_subdir = "awesome",
+    });
+    const rc = b.addInstallFile(awesome.path("awesomerc.lua"), "rc.lua");
+    b.getInstallStep().dependOn(&rc.step);
 
     const run_step = b.step("run", "Run the app");
 
@@ -59,7 +81,6 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     run_cmd.step.dependOn(b.getInstallStep());
-    run_cmd.addDirectoryArg(awesome_lua);
 
     if (b.args) |args| {
         run_cmd.addArgs(args);
