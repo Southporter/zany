@@ -97,13 +97,19 @@ fn listener(
         .session_locked => {},
         .session_unlocked => {},
         .window => |evt| {
+            const node = evt.id.getNode() catch {
+                return;
+            };
             // This pointer is not stable
             const window = wm.windows.addOne(wm.gpa) catch {
                 rwm.stop();
                 wm.state = .crash;
                 return;
             };
-            window.handle = evt.id;
+            window.* = .{
+                .handle = evt.id,
+                .node = node,
+            };
             evt.id.setListener(*WM, Window.listener, wm);
         },
         .output => |evt| {
@@ -255,6 +261,7 @@ const Window = struct {
     title: ?[:0]const u8 = null,
     app_id: ?[:0]const u8 = null,
     parent: ?*river.WindowV1 = null,
+    node: *river.NodeV1,
 
     fn listener(window: *river.WindowV1, event: river.WindowV1.Event, wm: *WM) void {
         log.debug("Got window event: {any}", .{event});

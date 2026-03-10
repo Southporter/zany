@@ -12,7 +12,8 @@ const Zany = @This();
 
 vm: *Lua,
 wm: *WindowManager,
-state: enum { running, stopped } = .stopped,
+state: enum { running, stopping, stopped } = .stopped,
+error_code: u8 = 0,
 
 pub const Config = struct {
     version: bool = false,
@@ -27,17 +28,52 @@ pub const Config = struct {
     pub const ScreenCreation = enum { on, off };
 };
 
-pub fn init(gpa: std.mem.Allocator, config: Config) !Zany {
-    _ = config;
+pub fn init(self: *Zany, gpa: std.mem.Allocator, config: Config) !void {
     const wm = try gpa.create(WindowManager);
     errdefer gpa.destroy(wm);
     try wm.init(gpa);
     const vm = try lua.Lua.init(gpa);
+    errdefer vm.deinit();
     _ = vm.atPanic(lua.wrap(onPanic));
     vm.openLibs();
     try zanyLua.fixup(vm);
 
-    return .{
+    try addPaths(vm, config);
+
+    const awesome_lib: []const lua.FnReg = &.{
+        .{ .name = "quit", .func = lua.wrap(quit) },
+        .{ .name = "exec", .func = lua.wrap(exec) },
+        .{ .name = "spawn", .func = lua.wrap(spawn) },
+        // { "spawn", luaA_spawn },
+        // { "restart", luaA_restart },
+        // { "connect_signal", luaA_awesome_connect_signal },
+        // { "disconnect_signal", luaA_awesome_disconnect_signal },
+        // { "emit_signal", luaA_awesome_emit_signal },
+        // { "systray", luaA_systray },
+        // { "load_image", luaA_load_image },
+        // { "pixbuf_to_surface", luaA_pixbuf_to_surface },
+        // { "set_preferred_icon_size", luaA_set_preferred_icon_size },
+        // { "register_xproperty", luaA_register_xproperty },
+        // { "set_xproperty", luaA_set_xproperty },
+        // { "get_xproperty", luaA_get_xproperty },
+        // { "__index", luaA_awesome_index },
+        // { "__newindex", luaA_default_newindex },
+        // { "xkb_set_layout_group", luaA_xkb_set_layout_group},
+        // { "xkb_get_layout_group", luaA_xkb_get_layout_group},
+        // { "xkb_get_group_names", luaA_xkb_get_group_names},
+        // { "xrdb_get_value", luaA_xrdb_get_value},
+        // { "kill", luaA_kill},
+        // { "sync", luaA_sync},
+    };
+    vm.pushLightUserdata(self);
+    vm.setGlobal("__zany");
+    try zanyLua.openLib(vm, "awesome", awesome_lib, awesome_lib);
+
+    try zanyLua.initRng(vm);
+
+    try zanyLua.loadRc(vm, config.config);
+
+    self.* = .{
         .vm = vm,
         .wm = wm,
     };
@@ -50,6 +86,7 @@ pub fn onPanic(L: *Lua) i32 {
 }
 
 pub fn deinit(zany: *Zany, gpa: std.mem.Allocator) void {
+    zany.wm.deinit();
     gpa.destroy(zany.wm);
     zany.vm.deinit();
 }
@@ -57,7 +94,7 @@ pub fn deinit(zany: *Zany, gpa: std.mem.Allocator) void {
 pub fn run(zany: *Zany) !void {
     zany.state = .running;
     log.info("Starting run loop", .{});
-    while (zany.state == .running) {
+    while (zany.state != .running) {
         zany.wm.poll() catch |err| {
             log.err("Window Manager encountered an error: {t}", .{err});
             zany.state = .stopped;
@@ -71,16 +108,18 @@ pub fn check(gpa: std.mem.Allocator, file: []const u8) !void {
 }
 
 fn addPaths(state: *Lua, config: Config) !void {
-    state.getGlobal("package");
-    if (state.typeOf(1) != .table) {
+    const pkg_type = try state.getGlobal("package");
+    if (pkg_type != .table) {
         log.warn("`package` is not a table", .{});
         return;
     }
-    state.getField(1, "path");
+    const path_type = state.getField(1, "path");
+    std.debug.assert(path_type == .string);
     addSearchPaths(state, config.search.items, .lua);
     state.setField(1, "path"); // update package.path to updated string
 
-    state.getField(1, "cpath");
+    const cpath_type = state.getField(1, "cpath");
+    std.debug.assert(cpath_type == .string);
     addSearchPaths(state, config.search.items, .so);
     state.setField(1, "cpath"); // update package.cpath to updated string
 
@@ -117,16 +156,38 @@ fn addSearchPaths(state: *Lua, paths: [][:0]const u8, kind: enum { lua, so }) vo
     // add Lua lib path (/usr/share/awesome/lib and /usr/share/zany/lib by default)
     switch (kind) {
         .lua => {
-            state.pushString(";" ++ options.awesome_lua_lib ++ "/?.lua");
-            state.pushString(";" ++ options.awesome_lua_lib ++ "/?/init.lua");
-            state.pushString(";" ++ options.zany_lua_lib ++ "/?.lua");
-            state.pushString(";" ++ options.zany_lua_lib ++ "/?/init.lua");
-            state.concat(5); // Concat onto the path string
+            _ = state.pushString(";" ++ options.awesome_lua_lib ++ "/?.lua");
+            _ = state.pushString(";" ++ options.awesome_lua_lib ++ "/?/init.lua");
+            _ = state.pushString(";" ++ options.zany_lua_lib ++ "/?.lua");
+            _ = state.pushString(";" ++ options.zany_lua_lib ++ "/?/init.lua");
+            _ = state.concat(5); // Concat onto the path string
         },
         .so => {
-            state.pushString(";" ++ options.awesome_lua_lib ++ "/?.so");
-            state.pushString(";" ++ options.zany_lua_lib ++ "/?.so");
-            state.concat(3); //concat onto the cpath string
+            _ = state.pushString(";" ++ options.awesome_lua_lib ++ "/?.so");
+            _ = state.pushString(";" ++ options.zany_lua_lib ++ "/?.so");
+            _ = state.concat(3); //concat onto the cpath string
         },
     }
+}
+
+fn quit(state: *Lua) i32 {
+    const error_code = if (state.isNoneOrNil(1)) 0 else state.checkInteger(1);
+    const global_type = state.getGlobal("__zany") catch |err| {
+        std.process.fatal("Unable to get zany global. Something has gone terribly wrong. {t}", .{err});
+    };
+    std.debug.assert(global_type == .userdata);
+    const zany: *Zany = state.toUserdata(Zany, -1) catch |err| {
+        std.process.fatal("Zany global userdata error: {t}", .{err});
+    };
+    zany.state = .stopping;
+    zany.error_code = @intCast(error_code);
+    return 0;
+}
+fn exec(state: *Lua) i32 {
+    _ = state;
+    return 0;
+}
+fn spawn(state: *Lua) i32 {
+    _ = state;
+    return 0;
 }

@@ -1,8 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const log = std.log.scoped(.zany);
-const zanywm = @import("zanywm");
-const Config = zanywm.Config;
+const Zany = @import("zanywm");
+const Config = Zany.Config;
 
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
@@ -29,8 +29,28 @@ pub fn main() !void {
     while (config_path_iter.next()) |path| {
         try config.search.append(options_arena.allocator(), try options_arena.allocator().dupeZ(u8, path));
     }
-    var zany = try zanywm.init(gpa.allocator(), config);
+    var zany: Zany = undefined;
+    try zany.init(gpa.allocator(), config);
     defer zany.deinit(gpa.allocator());
+
+    {
+        var sa: std.posix.Sigaction = .{
+            .handler = .{
+                .handler = fatal,
+            },
+            .flags = std.posix.SA.RESETHAND,
+            .mask = std.posix.sigemptyset(),
+        };
+        std.posix.sigaction(std.posix.SIG.ABRT, &sa, null);
+        std.posix.sigaction(std.posix.SIG.BUS, &sa, null);
+        std.posix.sigaction(std.posix.SIG.FPE, &sa, null);
+        std.posix.sigaction(std.posix.SIG.ILL, &sa, null);
+        std.posix.sigaction(std.posix.SIG.SEGV, &sa, null);
+
+        sa.handler.handler = child;
+        sa.flags = std.posix.SA.NOCLDSTOP | std.posix.SA.RESTART;
+        std.posix.sigaction(std.posix.SIG.CHLD, &sa, null);
+    }
 
     try zany.run();
 }
@@ -146,4 +166,15 @@ fn checkOptions(args: *std.process.ArgIterator, arena: std.mem.Allocator) !Confi
     }
 
     return config;
+}
+
+fn fatal(sig: i32) callconv(.c) void {
+    log.err("signal {d}, dumping stack trace", .{sig});
+    std.debug.dumpCurrentStackTrace(null);
+    std.process.exit(1);
+}
+
+fn child(sig: i32) callconv(.c) void {
+    std.debug.assert(sig == std.posix.SIG.CHLD);
+    std.process.fatal("Recieved SIG.CHLD", .{});
 }

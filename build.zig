@@ -39,7 +39,10 @@ pub fn build(b: *std.Build) void {
     const awesome = b.dependency("awesome", .{});
     const awesome_lua = awesome.path("lib");
 
-    const ziglua = b.dependency("zlua", .{});
+    const ziglua = b.dependency("zlua", .{
+        .lang = .luajit,
+        .shared = true,
+    });
 
     const mod = b.addModule("zanywm", .{
         .root_source_file = b.path("src/root.zig"),
