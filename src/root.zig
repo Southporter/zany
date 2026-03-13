@@ -2,7 +2,7 @@ const std = @import("std");
 const options = @import("options");
 const lua = @import("lua");
 const WindowManager = @import("WindowManager.zig");
-const zanyLua = @import("./lua.zig");
+const zany_lua = @import("./lua.zig");
 
 const log = std.log.scoped(.zany);
 
@@ -14,6 +14,7 @@ vm: *Lua,
 wm: *WindowManager,
 state: enum { running, stopping, stopped } = .stopped,
 error_code: u8 = 0,
+global_signals: std.ArrayList(zany_lua.Signal) = .empty,
 
 pub const Config = struct {
     version: bool = false,
@@ -36,7 +37,7 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, config: Config) !void {
     errdefer vm.deinit();
     _ = vm.atPanic(lua.wrap(onPanic));
     vm.openLibs();
-    try zanyLua.fixup(vm);
+    try zany_lua.fixup(vm);
 
     try addPaths(vm, config);
 
@@ -67,11 +68,11 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, config: Config) !void {
     };
     vm.pushLightUserdata(self);
     vm.setGlobal("__zany");
-    try zanyLua.openLib(vm, "awesome", awesome_lib, awesome_lib);
+    try zany_lua.openLib(vm, "awesome", awesome_lib, awesome_lib);
 
-    try zanyLua.initRng(vm);
+    try zany_lua.initRng(vm);
 
-    try zanyLua.loadRc(vm, config.config);
+    try zany_lua.loadRc(vm, config.config);
 
     self.* = .{
         .vm = vm,

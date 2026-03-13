@@ -2,6 +2,8 @@ const std = @import("std");
 const lua = @import("lua");
 const log = std.log.scoped(.zanyLua);
 
+const Class = @import("./lua/Class.zig");
+
 const Lua = lua.Lua;
 
 const Vm = @This();
@@ -35,28 +37,11 @@ fn mbstrlen(state: *Lua) i32 {
     return 1;
 }
 
-const Class = struct {
-    name: []const u8,
-
-    fn from(state: *Lua, index: i32) ?*Class {
-        const t = state.typeOf(index);
-        state.getMetatable(index) catch return null;
-        if (t == .userdata) {
-            const table_type = state.rawGetTable(lua.registry_index);
-            std.debug.assert(table_type == .userdata);
-            const class = state.toUserdata(Class, -1) catch return null;
-            state.pop(1);
-            return class;
-        }
-        return null;
-    }
-};
-
 fn customType(state: *Lua) i32 {
     state.checkAny(1);
     const t = state.typeOf(1);
     if (t == .userdata) {
-        const class = Class.from(state, 1);
+        const class = Class.get(state, 1);
         if (class) |c| {
             _ = state.pushString(c.name);
             return 1;
@@ -229,4 +214,16 @@ fn onError(state: *Lua) i32 {
     //     lua_concat(L, 3);
     // }
     return 0;
+}
+
+pub inline fn getuservalue(state: *Lua, idx: i32) void {
+    switch (lua.lang) {
+        .lua51, .luajit => state.getFnEnvironment(idx),
+        else => state.getUserValue52(idx),
+    }
+}
+pub inline fn deprecate(src: std.debug.SourceLocation, state: *Lua, repl: []const u8) void {
+    log.warn("{s}: This function is deprecated and will be removed, see %s", .{ src, repl });
+    state.pushstring(std.fmt.comptimePrint("{s}:{d}", .{ src.file_name, src.line }));
+    //signal_object_emit(state, global_signals, "debug::deprecation", 1);
 }
