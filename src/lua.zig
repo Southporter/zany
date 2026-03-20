@@ -3,6 +3,7 @@ const lua = @import("lua");
 const log = std.log.scoped(.zanyLua);
 
 const Class = @import("./lua/Class.zig");
+pub const Signal = @import("./Signal.zig");
 
 const Lua = lua.Lua;
 
@@ -63,7 +64,7 @@ pub fn openLib(state: *Lua, name: [:0]const u8, methods: []const lua.FnReg, meta
     state.pop(2);
 }
 
-fn registerFns(state: *Lua, name: [:0]const u8, methods: []const lua.FnReg) !void {
+pub fn registerFns(state: *Lua, name: [:0]const u8, methods: []const lua.FnReg) !void {
     state.newTable();
 
     state.setFuncs(methods, 0);
@@ -216,14 +217,53 @@ fn onError(state: *Lua) i32 {
     return 0;
 }
 
-pub inline fn getuservalue(state: *Lua, idx: i32) void {
+pub fn getuservalue(state: *Lua, idx: i32) void {
     switch (lua.lang) {
         .lua51, .luajit => state.getFnEnvironment(idx),
         else => state.getUserValue52(idx),
     }
 }
-pub inline fn deprecate(src: std.debug.SourceLocation, state: *Lua, repl: []const u8) void {
-    log.warn("{s}: This function is deprecated and will be removed, see %s", .{ src, repl });
-    state.pushstring(std.fmt.comptimePrint("{s}:{d}", .{ src.file_name, src.line }));
+pub fn deprecate(src: std.builtin.SourceLocation, state: *Lua, repl: []const u8) void {
+    log.warn("{s}: This function is deprecated and will be removed, see {s}", .{ src.fn_name, repl });
+    _ = state.pushStringZ(src.fn_name);
     //signal_object_emit(state, global_signals, "debug::deprecation", 1);
+}
+pub fn typeError(state: *lua.Lua, narg: i32, tname: [:0]const u8) i32 {
+    const msg = state.pushFString("%s expected, got %s", .{ tname.ptr, state.typeNameIndex(narg).ptr });
+    switch (lua.lang) {
+        .lua51, .luajit => {},
+        else => {
+            state.traceback(state, null, 2);
+            state.concat(2);
+        },
+    }
+    return state.argError(narg, msg);
+}
+
+// Print a warning about some Lua code.
+// This is less mean than luaL_error() which setjmp via lua_error() and kills
+// everything. This only warn, it's up to you to then do what's should be done.
+// \param L The Lua VM state.
+// \param fmt The warning message.
+pub fn warn(state: *lua.Lua, comptime fmt: []const u8, args: anytype) void {
+    state.where(1);
+    var buf: [256]u8 = undefined;
+    const stderr = std.fs.File.stderr();
+    var writer = stderr.writer(&buf);
+
+    writer.interface.print("{s}W: ", .{state.toString(-1) catch unreachable}) catch return;
+
+    state.pop(1);
+    writer.interface.print(fmt, args) catch return;
+    writer.interface.writeByte('\n') catch return;
+
+    switch (lua.lang) {
+        .luajit, .lua51 => {},
+        else => {
+            state.traceback(state, null, 2);
+            writer.interface.print("%s\n", .{state.toString(-1)}) catch return;
+            state.pop();
+        },
+    }
+    writer.interface.flush() catch return;
 }

@@ -3,6 +3,8 @@ const options = @import("options");
 const lua = @import("lua");
 const WindowManager = @import("WindowManager.zig");
 const zany_lua = @import("./lua.zig");
+const screen = @import("screen.zig");
+const Object = @import("lua/Object.zig");
 
 const log = std.log.scoped(.zany);
 
@@ -69,6 +71,9 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, config: Config) !void {
     vm.pushLightUserdata(self);
     vm.setGlobal("__zany");
     try zany_lua.openLib(vm, "awesome", awesome_lib, awesome_lib);
+    Object.setup(vm);
+
+    try screen.setup(vm);
 
     try zany_lua.initRng(vm);
 
