@@ -5,6 +5,7 @@ const WindowManager = @import("WindowManager.zig");
 const zany_lua = @import("./lua.zig");
 const screen = @import("screen.zig");
 const Object = @import("lua/Object.zig");
+const base = @import("lua/base.zig");
 
 const log = std.log.scoped(.zany);
 
@@ -47,7 +48,6 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, config: Config) !void {
         .{ .name = "quit", .func = lua.wrap(quit) },
         .{ .name = "exec", .func = lua.wrap(exec) },
         .{ .name = "spawn", .func = lua.wrap(spawn) },
-        // { "spawn", luaA_spawn },
         // { "restart", luaA_restart },
         // { "connect_signal", luaA_awesome_connect_signal },
         // { "disconnect_signal", luaA_awesome_disconnect_signal },
@@ -71,6 +71,7 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, config: Config) !void {
     vm.pushLightUserdata(self);
     vm.setGlobal("__zany");
     try zany_lua.openLib(vm, "awesome", awesome_lib, awesome_lib);
+    try zany_lua.openLib(vm, "root", &base.methods, &base.meta);
     Object.setup(vm);
 
     try screen.setup(vm);
