@@ -281,7 +281,11 @@ fn incref(state: *lua.Lua, tud: i32, oud: i32) ?*anyopaque {
     // Get the number of references
     _ = state.rawGetTable(-2);
     // Get the number of references and increment it
-    const count = (state.toInteger(-1) catch unreachable) + 1;
+    const count = switch (state.typeOf(-1)) {
+        .number => (state.toInteger(-1) catch unreachable) + 1,
+        .nil => 1,
+        else => |kind| std.debug.panic("Unable to convert {t} to an integer for count", .{kind}),
+    };
     state.pop(1);
     // Push the pointer (key)
     state.pushLightUserdata(pointer);

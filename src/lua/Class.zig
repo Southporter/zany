@@ -38,12 +38,65 @@ pub const Property = struct {
     newindex: ?PropFn = null,
 };
 
+pub fn create(class: *Class, comptime T: type, state: *lua.Lua) ?*Object {
+    const item = std.heap.c_allocator.create(T) catch return null;
+    item.* = .{};
+    class.instances += 1;
+
+    _ = class.setType(state);
+    state.newTable();
+    state.newTable();
+    state.setMetatable(-2);
+    state.newTable();
+    state.setField(-2, "data");
+    lib.setUserValue(state, -2) catch |err| {
+        std.debug.panic("Unexpected error in setUserValue: {t}", .{err});
+        return null;
+    };
+    state.pushValue(-1);
+    class.emitSignal(state, "new", 1);
+
+    return &item.obj;
+}
+
+// Generic constructor function for objects.
+// \param L The Lua VM state.
+// \return The number of elements pushed on stack.
+//
+pub fn new(class: *Class, state: *lua.Lua) i32 {
+    // Check we have a table that should contains some properties
+    lib.checkTable(state, 2);
+
+    // Create a new object
+    const obj = class.allocator(state) orelse return 0;
+    // Push the first key before iterating
+    state.pushNil();
+    // Iterate over the property keys
+    while (state.next(2)) {
+        // Check that the key is a string.
+        // We cannot call tostring blindly or Lua will convert a key that is a
+        // number TO A STRING, confusing lua_next() */
+        if (state.isString(-2)) {
+            const prop = class.getProperty(state, -2);
+
+            if (prop) |p| {
+                if (p.new) |alloc| {
+                    _ = alloc(state, obj);
+                }
+            }
+        }
+        // Remove value
+        state.pop(1);
+    }
+
+    return 1;
+}
+
 pub fn get(state: *lua.Lua, offset: i32) ?*Class {
     const t = state.typeOf(offset);
     state.getMetatable(offset) catch return null;
     if (t == .userdata) {
-        const table_type = state.rawGetTable(lua.registry_index);
-        std.debug.assert(table_type == .userdata);
+        _ = state.rawGetTable(lua.registry_index);
         const class = state.toUserdata(Class, -1) catch return null;
         state.pop(1);
         return class;
@@ -372,4 +425,12 @@ fn set_index_miss_handler(state: *lua.Lua) i32 {
 fn set_newindex_miss_handler(state: *lua.Lua) i32 {
     _ = state;
     return 0;
+}
+
+// From `common/luaobject.c`
+pub fn setType(class: *Class, state: *lua.Lua) i32 {
+    state.pushLightUserdata(class);
+    _ = state.rawGetTable(lua.registry_index);
+    state.setMetatable(-2);
+    return 1;
 }

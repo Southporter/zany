@@ -76,6 +76,11 @@ pub fn checkFunction(state: *lua.Lua, idx: i32) void {
         _ = zanylua.typeError(state, idx, "function");
     }
 }
+pub fn checkTable(state: *lua.Lua, idx: i32) void {
+    if (!state.isTable(idx)) {
+        _ = zanylua.typeError(state, idx, "table");
+    }
+}
 
 // Convert a stack index to positive.
 // \param L The Lua VM state.
@@ -83,4 +88,12 @@ pub fn checkFunction(state: *lua.Lua, idx: i32) void {
 // \return A positive index.
 pub inline fn absindex(state: *lua.Lua, ud: i32) i32 {
     return if (ud > 0 or ud <= lua.registry_index) ud else state.getTop() + ud + 1;
+}
+
+pub fn setUserValue(state: *lua.Lua, index: i32) !void {
+    return switch (lua.lang) {
+        .lua51, .luajit => state.setFnEnvironment(index),
+        .lua52, .lua53 => state.setUserValue(index),
+        else => @compileError("setUserValue not implemented for >= 5.4"),
+    };
 }

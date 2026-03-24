@@ -3,7 +3,11 @@ const options = @import("options");
 const lua = @import("lua");
 const WindowManager = @import("WindowManager.zig");
 const zany_lua = @import("./lua.zig");
+const zany_lib = @import("./lua/lib.zig");
+const util = @import("./util.zig");
 const screen = @import("screen.zig");
+const button = @import("button.zig");
+const client = @import("client.zig");
 const Object = @import("lua/Object.zig");
 const base = @import("lua/base.zig");
 
@@ -17,7 +21,7 @@ vm: *Lua,
 wm: *WindowManager,
 state: enum { running, stopping, stopped } = .stopped,
 error_code: u8 = 0,
-global_signals: std.ArrayList(zany_lua.Signal) = .empty,
+var global_signals: std.ArrayList(zany_lua.Signal) = .empty;
 
 pub const Config = struct {
     version: bool = false,
@@ -48,25 +52,25 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, config: Config) !void {
         .{ .name = "quit", .func = lua.wrap(quit) },
         .{ .name = "exec", .func = lua.wrap(exec) },
         .{ .name = "spawn", .func = lua.wrap(spawn) },
-        // { "restart", luaA_restart },
-        // { "connect_signal", luaA_awesome_connect_signal },
-        // { "disconnect_signal", luaA_awesome_disconnect_signal },
-        // { "emit_signal", luaA_awesome_emit_signal },
-        // { "systray", luaA_systray },
-        // { "load_image", luaA_load_image },
-        // { "pixbuf_to_surface", luaA_pixbuf_to_surface },
-        // { "set_preferred_icon_size", luaA_set_preferred_icon_size },
-        // { "register_xproperty", luaA_register_xproperty },
-        // { "set_xproperty", luaA_set_xproperty },
-        // { "get_xproperty", luaA_get_xproperty },
-        // { "__index", luaA_awesome_index },
-        // { "__newindex", luaA_default_newindex },
-        // { "xkb_set_layout_group", luaA_xkb_set_layout_group},
-        // { "xkb_get_layout_group", luaA_xkb_get_layout_group},
-        // { "xkb_get_group_names", luaA_xkb_get_group_names},
-        // { "xrdb_get_value", luaA_xrdb_get_value},
-        // { "kill", luaA_kill},
-        // { "sync", luaA_sync},
+        .{ .name = "restart", .func = lua.wrap(restart) },
+        .{ .name = "connect_signal", .func = lua.wrap(connect_signal) },
+        .{ .name = "disconnect_signal", .func = lua.wrap(disconnect_signal) },
+        .{ .name = "emit_signal", .func = lua.wrap(emit_signal) },
+        .{ .name = "systray", .func = lua.wrap(systray) },
+        .{ .name = "load_image", .func = lua.wrap(load_image) },
+        .{ .name = "pixbuf_to_surface", .func = lua.wrap(pixbuf_to_surface) },
+        .{ .name = "set_preferred_icon_size", .func = lua.wrap(set_preferred_icon_size) },
+        .{ .name = "register_xproperty", .func = lua.wrap(register_xproperty) },
+        .{ .name = "set_xproperty", .func = lua.wrap(set_xproperty) },
+        .{ .name = "get_xproperty", .func = lua.wrap(get_xproperty) },
+        .{ .name = "__index", .func = lua.wrap(index) },
+        .{ .name = "__newindex", .func = lua.wrap(default_newindex) },
+        .{ .name = "xkb_set_layout_group", .func = lua.wrap(xkb_set_layout_group) },
+        .{ .name = "xkb_get_layout_group", .func = lua.wrap(xkb_get_layout_group) },
+        .{ .name = "xkb_get_group_names", .func = lua.wrap(xkb_get_group_names) },
+        .{ .name = "xrdb_get_value", .func = lua.wrap(xrdb_get_value) },
+        .{ .name = "kill", .func = lua.wrap(kill) },
+        .{ .name = "sync", .func = lua.wrap(sync) },
     };
     vm.pushLightUserdata(self);
     vm.setGlobal("__zany");
@@ -75,6 +79,29 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, config: Config) !void {
     Object.setup(vm);
 
     try screen.setup(vm);
+    try button.setup(vm);
+    // try tag.setup(vm);
+    // try window.setup(vm);
+    // try drawable.setup(vm);
+    // try drawin.setup(vm);
+    try client.setup(vm);
+    // /* Export selection getter */
+    // selection_getter_class_setup(L);
+    //
+    // /* Export keys */
+    // key_class_setup(L);
+    //
+    // /* Export selection acquire */
+    // selection_acquire_class_setup(L);
+    //
+    // /* Export selection transfer */
+    // selection_transfer_class_setup(L);
+    //
+    // /* Export selection watcher */
+    // selection_watcher_class_setup(L);
+    //
+    // /* Setup the selection interface */
+    // selection_setup(L);
 
     try zany_lua.initRng(vm);
 
@@ -192,9 +219,121 @@ fn quit(state: *Lua) i32 {
 }
 fn exec(state: *Lua) i32 {
     _ = state;
+    std.debug.panic("awesome.exec not implemented", .{});
     return 0;
 }
 fn spawn(state: *Lua) i32 {
     _ = state;
+    std.debug.panic("awesome.spawn not implemented", .{});
+    return 0;
+}
+fn kill(state: *Lua) i32 {
+    _ = state;
+    std.debug.panic("awesome.kill not implemented", .{});
+    return 0;
+}
+fn sync(state: *Lua) i32 {
+    _ = state;
+    std.debug.panic("awesome.sync not implemented", .{});
+    return 0;
+}
+fn restart(state: *Lua) i32 {
+    _ = state;
+    std.debug.panic("awesome.restart not implemented", .{});
+    return 0;
+}
+// Add a global signal.
+//
+// @tparam string name A string with the event name.
+// @tparam function func The function to call.
+// @staticfct connect_signal
+// @noreturn
+fn connect_signal(state: *Lua) i32 {
+    const name = state.checkString(1);
+    zany_lib.checkFunction(state, 2);
+
+    const func = Object.ref(state, 2) orelse return 0;
+
+    const id = util.strhash(name);
+    for (global_signals.items) |*signal| {
+        if (signal.id == id) {
+            signal.funcs.append(std.heap.c_allocator, func) catch {};
+        }
+    }
+    return 0;
+}
+fn disconnect_signal(state: *Lua) i32 {
+    _ = state;
+    std.debug.panic("awesome.disconnect_signal not implemented", .{});
+    return 0;
+}
+fn emit_signal(state: *Lua) i32 {
+    _ = state;
+    std.debug.panic("awesome.emit_signal not implemented", .{});
+    return 0;
+}
+fn systray(state: *Lua) i32 {
+    _ = state;
+    std.debug.panic("awesome.systray not implemented", .{});
+    return 0;
+}
+fn load_image(state: *Lua) i32 {
+    _ = state;
+    std.debug.panic("awesome.load_image not implemented", .{});
+    return 0;
+}
+fn pixbuf_to_surface(state: *Lua) i32 {
+    _ = state;
+    std.debug.panic("awesome.pixbuf_to_surface not implemented", .{});
+    return 0;
+}
+fn set_preferred_icon_size(state: *Lua) i32 {
+    _ = state;
+    std.debug.panic("awesome.set_preferred_icon_size not implemented", .{});
+    return 0;
+}
+fn register_xproperty(state: *Lua) i32 {
+    _ = state;
+    std.debug.panic("awesome.register_xproperty not implemented", .{});
+    return 0;
+}
+fn set_xproperty(state: *Lua) i32 {
+    _ = state;
+    std.debug.panic("awesome.set_xproperty not implemented", .{});
+    return 0;
+}
+fn get_xproperty(state: *Lua) i32 {
+    _ = state;
+    std.debug.panic("awesome.get_xproperty not implemented", .{});
+    return 0;
+}
+fn index(state: *Lua) i32 {
+    _ = state;
+    std.debug.panic("awesome.index not implemented", .{});
+    return 0;
+}
+fn default_newindex(state: *Lua) i32 {
+    _ = state;
+    std.debug.panic("awesome.default_newindex not implemented", .{});
+    return 0;
+}
+fn xkb_set_layout_group(state: *Lua) i32 {
+    _ = state;
+    std.debug.panic("awesome.default_newindex not implemented", .{});
+    return 0;
+}
+fn xkb_get_layout_group(state: *Lua) i32 {
+    _ = state;
+    std.debug.panic("awesome.default_newindex not implemented", .{});
+    return 0;
+}
+fn xkb_get_group_names(state: *Lua) i32 {
+    _ = state;
+    std.debug.panic("awesome.default_newindex not implemented", .{});
+    return 0;
+}
+fn xrdb_get_value(state: *Lua) i32 {
+    _ = state;
+    std.debug.panic("awesome.default_newindex not implemented", .{});
     return 0;
 }
