@@ -41,7 +41,8 @@ pub fn setup(state: *lua.Lua) !void {
 }
 
 fn new(state: *lua.Lua) ?*Object {
-    return button_class.create(Button, state);
+    const button = button_class.create(Button, state) orelse return null;
+    return &button.obj;
 }
 
 fn wipe(obj: *Object) void {

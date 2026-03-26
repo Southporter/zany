@@ -4,9 +4,12 @@ const lua = @import("lua");
 const WindowManager = @import("WindowManager.zig");
 const zany_lua = @import("./lua.zig");
 const zany_lib = @import("./lua/lib.zig");
+const globals = @import("globals.zig");
 const util = @import("./util.zig");
 const screen = @import("screen.zig");
 const button = @import("button.zig");
+const tag = @import("tag.zig");
+const window = @import("window.zig");
 const client = @import("client.zig");
 const Object = @import("lua/Object.zig");
 const base = @import("lua/base.zig");
@@ -16,13 +19,6 @@ const log = std.log.scoped(.zany);
 const Lua = lua.Lua;
 
 const Zany = @This();
-
-vm: *Lua,
-wm: *WindowManager,
-state: enum { running, stopping, stopped } = .stopped,
-error_code: u8 = 0,
-var global_signals: std.ArrayList(zany_lua.Signal) = .empty;
-
 pub const Config = struct {
     version: bool = false,
     config: ?[:0]const u8 = null,
@@ -36,10 +32,15 @@ pub const Config = struct {
     pub const ScreenCreation = enum { on, off };
 };
 
+vm: *Lua,
+wm: WindowManager,
+state: enum { running, stopping, stopped } = .stopped,
+error_code: u8 = 0,
+
 pub fn init(self: *Zany, gpa: std.mem.Allocator, config: Config) !void {
-    const wm = try gpa.create(WindowManager);
-    errdefer gpa.destroy(wm);
-    try wm.init(gpa);
+    globals.gpa = gpa;
+    try self.wm.init(gpa);
+    errdefer self.wm.deinit();
     const vm = try lua.Lua.init(gpa);
     errdefer vm.deinit();
     _ = vm.atPanic(lua.wrap(onPanic));
@@ -80,8 +81,8 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, config: Config) !void {
 
     try screen.setup(vm);
     try button.setup(vm);
-    // try tag.setup(vm);
-    // try window.setup(vm);
+    try tag.setup(vm);
+    try window.setup(vm);
     // try drawable.setup(vm);
     // try drawin.setup(vm);
     try client.setup(vm);
@@ -105,12 +106,21 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, config: Config) !void {
 
     try zany_lua.initRng(vm);
 
+    screen.screen_class.emitSignal(vm, "scanning", 0);
+    // for (wm.outputs.items, 0..) |output, id| {
+    //     const s = try gpa.create(screen);
+    //     s.* = .{
+    //         .valid = true,
+    //         .output_id = id,
+    //     };
+    //     globals.screens.append(gpa, s);
+    //     screen.screen_class.emitSignal(vm, "")
+    // }
+    screen.screen_class.emitSignal(vm, "scanned", 0);
+
     try zany_lua.loadRc(vm, config.config);
 
-    self.* = .{
-        .vm = vm,
-        .wm = wm,
-    };
+    self.vm = vm;
 }
 
 pub fn onPanic(L: *Lua) i32 {
@@ -119,9 +129,8 @@ pub fn onPanic(L: *Lua) i32 {
     return 0;
 }
 
-pub fn deinit(zany: *Zany, gpa: std.mem.Allocator) void {
+pub fn deinit(zany: *Zany) void {
     zany.wm.deinit();
-    gpa.destroy(zany.wm);
     zany.vm.deinit();
 }
 
@@ -255,7 +264,7 @@ fn connect_signal(state: *Lua) i32 {
     const func = Object.ref(state, 2) orelse return 0;
 
     const id = util.strhash(name);
-    for (global_signals.items) |*signal| {
+    for (globals.signals.items) |*signal| {
         if (signal.id == id) {
             signal.funcs.append(std.heap.c_allocator, func) catch {};
         }
@@ -292,11 +301,64 @@ fn set_preferred_icon_size(state: *Lua) i32 {
     std.debug.panic("awesome.set_preferred_icon_size not implemented", .{});
     return 0;
 }
+
+// Register a new xproperty.
+// \param L The Lua VM state.
+// \return The number of elements pushed on stack.
+// \luastack
+// \lparam The name of the X11 property
+// \lparam One of "string", "number" or "boolean"
 fn register_xproperty(state: *Lua) i32 {
-    _ = state;
-    std.debug.panic("awesome.register_xproperty not implemented", .{});
+    // const char *name;
+    // struct xproperty property;
+    // struct xproperty *found;
+    // const char *const args[] = { "string", "number", "boolean" };
+    const args = enum {
+        string,
+        number,
+        boolean,
+    };
+    const name = state.checkString(1);
+    const kind = state.checkOption(args, 2, null);
+    log.info("Registering property {s} of kind {t}", .{ name, kind });
+    // xcb_intern_atom_reply_t *atom_r;
+    // int type;
+    //
+    // name = luaL_checkstring(L, 1);
+    // type = luaL_checkoption(L, 2, NULL, args);
+    // if (type == 0)
+    //     property.type = PROP_STRING;
+    // else if (type == 1)
+    //     property.type = PROP_NUMBER;
+    // else
+    //     property.type = PROP_BOOLEAN;
+    //
+    // atom_r = xcb_intern_atom_reply(globalconf.connection,
+    //                                xcb_intern_atom_unchecked(globalconf.connection, false,
+    //                                                          a_strlen(name), name),
+    //                                NULL);
+    // if(!atom_r)
+    //     return 0;
+    //
+    // property.atom = atom_r->atom;
+    // p_delete(&atom_r);
+    //
+    // found = xproperty_array_lookup(&globalconf.xproperties, &property);
+    // if(found)
+    // {
+    //     /* Property already registered */
+    //     if(found->type != property.type)
+    //         return luaL_error(L, "xproperty '%s' already registered with different type", name);
+    // }
+    // else
+    // {
+    //     property.name = a_strdup(name);
+    //     xproperty_array_insert(&globalconf.xproperties, property);
+    // }
+    //
     return 0;
 }
+
 fn set_xproperty(state: *Lua) i32 {
     _ = state;
     std.debug.panic("awesome.set_xproperty not implemented", .{});

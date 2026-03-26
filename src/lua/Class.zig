@@ -38,7 +38,7 @@ pub const Property = struct {
     newindex: ?PropFn = null,
 };
 
-pub fn create(class: *Class, comptime T: type, state: *lua.Lua) ?*Object {
+pub fn create(class: *Class, comptime T: type, state: *lua.Lua) ?*T {
     const item = std.heap.c_allocator.create(T) catch return null;
     item.* = .{};
     class.instances += 1;
@@ -56,7 +56,7 @@ pub fn create(class: *Class, comptime T: type, state: *lua.Lua) ?*Object {
     state.pushValue(-1);
     class.emitSignal(state, "new", 1);
 
-    return &item.obj;
+    return item;
 }
 
 // Generic constructor function for objects.
@@ -330,6 +330,8 @@ pub fn setup(class: *Class, state: *lua.Lua, methods: []const lua.FnReg, meta: [
             .{ .name = "set_newindex_miss_handler", .func = lua.wrap(set_newindex_miss_handler) },
         }, 1);
         state.setFuncs(methods, 0);
+        state.pushValue(-1);
+        state.setGlobal(class.name);
     } // 2
     state.pushValue(-1); // dup self as metatable              3
     state.setMetatable(-2); // set self as metatable              2 */

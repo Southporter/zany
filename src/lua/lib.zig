@@ -61,7 +61,7 @@ pub fn doFunction(state: *lua.Lua, nargs: i32, nret: i32) bool {
         .results = nret,
         .msg_handler = -nargs - 2,
     }) catch |err| {
-        log.warn("{t}: {s}", .{ err, state.toString(-1) catch unreachable });
+        log.warn("{t}: {s}", .{ err, state.toString(-1) catch @tagName(state.typeOf(-1)) });
         //remove error func and error string
         state.pop(2);
         return false;
@@ -80,6 +80,12 @@ pub fn checkTable(state: *lua.Lua, idx: i32) void {
     if (!state.isTable(idx)) {
         _ = zanylua.typeError(state, idx, "table");
     }
+}
+pub fn checkBoolean(state: *lua.Lua, idx: i32) bool {
+    if (!state.isBoolean(idx)) {
+        _ = zanylua.typeError(state, idx, "boolean");
+    }
+    return state.toBoolean(idx);
 }
 
 // Convert a stack index to positive.

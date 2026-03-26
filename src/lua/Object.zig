@@ -137,7 +137,7 @@ fn disconnectSignalFromStack(state: *lua.Lua, oud: i32, name: [:0]const u8, ud: 
 // @tparam string name A signal name.
 // @param[opt] ... Various arguments.
 // @function emit_signal
-fn emitSignal(state: *lua.Lua, oud: i32, name: [:0]const u8, nargs: i32) void {
+pub fn emitSignal(state: *lua.Lua, oud: i32, name: [:0]const u8, nargs: i32) void {
     const oud_abs = lib.absindex(state, oud);
     const class = Class.get(state, oud) orelse {
         log.warn("Could not find class at {d}", .{oud});
@@ -237,7 +237,7 @@ pub fn ref(state: *lua.Lua, oud: i32) ?*anyopaque {
 // \return The object reference, or NULL if not referenceable.
 //
 pub fn refClass(state: *lua.Lua, oud: i32, class: *Class) ?*anyopaque {
-    class.checkudata(state, oud);
+    _ = class.checkudata(state, oud);
     return ref(state, oud);
 }
 

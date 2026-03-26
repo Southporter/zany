@@ -31,7 +31,7 @@ pub fn main() !void {
     }
     var zany: Zany = undefined;
     try zany.init(gpa.allocator(), config);
-    defer zany.deinit(gpa.allocator());
+    defer zany.deinit();
 
     {
         var sa: std.posix.Sigaction = .{

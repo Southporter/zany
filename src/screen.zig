@@ -3,6 +3,9 @@ const lua = @import("lua");
 const lib = @import("lua/lib.zig");
 const Class = @import("lua/Class.zig");
 const Object = @import("lua/Object.zig");
+const zany = @import("root.zig");
+const zanylua = @import("./lua.zig");
+const globals = @import("globals.zig");
 
 const Screen = @This();
 
@@ -24,9 +27,9 @@ workarea: Area = .{},
 // /** The name of the screen */
 name: ?[]const u8 = null,
 // /** Opaque pointer to the viewport */
-// struct viewport_t *viewport;
-// /** Some XID identifying this screen */
-// uint32_t xid;
+// viewport: *Viewport =
+// Some XID identifying this screen */
+output_id: usize = std.math.maxInt(usize),
 
 var props = [_]Class.Property{
     .{
@@ -57,7 +60,7 @@ var props = [_]Class.Property{
     },
 };
 
-var screen_class: Class = .{
+pub var screen_class: Class = .{
     .name = "screen",
     .properties = props[0..],
     .allocator = new,
@@ -83,7 +86,8 @@ pub fn setup(state: *lua.Lua) !void {
 }
 
 fn new(state: *lua.Lua) ?*Object {
-    return screen_class.create(Screen, state);
+    const screen = screen_class.create(Screen, state) orelse return null;
+    return &screen.obj;
 }
 
 fn wipe(obj: *Object) void {
@@ -186,4 +190,20 @@ pub fn setName(state: *lua.Lua, obj: *Object) i32 {
     _ = obj;
     std.debug.panic("`screen.name = x` not implemented", .{});
     return 0;
+}
+
+// Get a screen argument from the lua stack
+pub fn checkscreen(state: *lua.Lua, sidx: i32) ?*Screen {
+    if (state.isNumber(sidx)) {
+        const screen = state.toInteger(sidx) catch unreachable;
+        if (screen < 1 or screen > globals.screens.items.len) {
+            zanylua.warn(state, "invalid screen number: {d} (of {d} existing)", .{ screen, globals.screens.items.len });
+            state.pushNil();
+            return null;
+        }
+        return globals.screens.items[@intCast(screen - 1)];
+    } else {
+        const obj = screen_class.checkudata(state, sidx) orelse return null;
+        return @fieldParentPtr("obj", obj);
+    }
 }

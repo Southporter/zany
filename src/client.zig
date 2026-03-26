@@ -1,6 +1,7 @@
 const std = @import("std");
 const lua = @import("lua");
 const lib = @import("lua/lib.zig");
+const globals = @import("globals.zig");
 const Window = @import("window.zig");
 const Screen = @import("screen.zig");
 const Class = @import("lua/Class.zig");
@@ -9,10 +10,10 @@ const Object = @import("lua/Object.zig");
 const Client = @This();
 
 // WINDOW_OBJECT_HEADER
-window: Window,
+window: Window = .{},
 
 // Client logical screen
-screen: *Screen,
+screen: ?*Screen = null,
 // Client name
 name: ?[:0]const u8 = null,
 alt_name: ?[:0]const u8 = null,
@@ -106,12 +107,212 @@ has_NET_WM_WINDOW_TYPE: bool = false,
 // } titlebar[CLIENT_TITLEBAR_COUNT];
 // /** Motif WM hints, with an additional MWM_HINTS_AWESOME_SET bit */
 // motif_wm_hints_t motif_wm_hints;
+//
 
-var client_class: Class = .{
+var props = [_]Class.Property{
+    .{ .name = "name", .new = set_name, .index = get_name, .newindex = set_name },
+    .{
+        .name = "transient_for",
+        .index = get_transient_for,
+    },
+    .{ .name = "skip_taskbar", .new = set_skip_taskbar, .index = get_skip_taskbar, .newindex = set_skip_taskbar },
+    .{
+        .name = "content",
+        .index = get_content,
+    },
+    .{
+        .name = "type",
+        .index = Window.get_type,
+    },
+    .{
+        .name = "class",
+        .index = get_class,
+    },
+    .{
+        .name = "instance",
+        .index = get_instance,
+    },
+    .{
+        .name = "role",
+        .index = get_role,
+    },
+    .{
+        .name = "pid",
+        .index = get_pid,
+    },
+    .{
+        .name = "leader_window",
+        .index = get_leader_window,
+    },
+    .{
+        .name = "machine",
+        .index = get_machine,
+    },
+    .{
+        .name = "icon_name",
+        .index = get_icon_name,
+    },
+    .{
+        .name = "screen",
+        .index = get_screen,
+        .newindex = set_screen,
+    },
+    .{
+        .name = "hidden",
+        .new = set_hidden,
+        .index = get_hidden,
+        .newindex = set_hidden,
+    },
+    .{
+        .name = "minimized",
+        .new = set_minimized,
+        .index = get_minimized,
+        .newindex = set_minimized,
+    },
+    .{
+        .name = "fullscreen",
+        .new = set_fullscreen,
+        .index = get_fullscreen,
+        .newindex = set_fullscreen,
+    },
+    .{
+        .name = "modal",
+        .new = set_modal,
+        .index = get_modal,
+        .newindex = set_modal,
+    },
+    .{
+        .name = "motif_wm_hints",
+        .index = get_motif_wm_hints,
+    },
+    .{
+        .name = "group_window",
+        .index = get_group_window,
+    },
+    .{
+        .name = "maximized",
+        .new = set_maximized,
+        .index = get_maximized,
+        .newindex = set_maximized,
+    },
+    .{
+        .name = "maximized_horizontal",
+        .new = set_maximized_horizontal,
+        .index = get_maximized_horizontal,
+        .newindex = set_maximized_horizontal,
+    },
+    .{
+        .name = "maximized_vertical",
+        .new = set_maximized_vertical,
+        .index = get_maximized_vertical,
+        .newindex = set_maximized_vertical,
+    },
+    .{
+        .name = "icon",
+        .new = set_icon,
+        .index = get_icon,
+        .newindex = set_icon,
+    },
+    .{
+        .name = "icon_sizes",
+        .index = get_icon_sizes,
+    },
+    .{
+        .name = "ontop",
+        .new = set_ontop,
+        .index = get_ontop,
+        .newindex = set_ontop,
+    },
+    .{
+        .name = "above",
+        .new = set_above,
+        .index = get_above,
+        .newindex = set_above,
+    },
+    .{
+        .name = "below",
+        .new = set_below,
+        .index = get_below,
+        .newindex = set_below,
+    },
+    .{
+        .name = "sticky",
+        .new = set_sticky,
+        .index = get_sticky,
+        .newindex = set_sticky,
+    },
+    .{
+        .name = "size_hints_honor",
+        .new = set_size_hints_honor,
+        .index = get_size_hints_honor,
+        .newindex = set_size_hints_honor,
+    },
+    .{
+        .name = "urgent",
+        .new = set_urgent,
+        .index = get_urgent,
+        .newindex = set_urgent,
+    },
+    .{
+        .name = "size_hints",
+        .index = get_size_hints,
+    },
+    .{
+        .name = "focusable",
+        .new = set_focusable,
+        .index = get_focusable,
+        .newindex = set_focusable,
+    },
+    .{
+        .name = "shape_bounding",
+        .new = set_shape_bounding,
+        .index = get_shape_bounding,
+        .newindex = set_shape_bounding,
+    },
+    .{
+        .name = "shape_clip",
+        .new = set_shape_clip,
+        .index = get_shape_clip,
+        .newindex = set_shape_clip,
+    },
+    .{
+        .name = "shape_input",
+        .new = set_shape_input,
+        .index = get_shape_input,
+        .newindex = set_shape_input,
+    },
+    .{
+        .name = "startup_id",
+        .new = set_startup_id,
+        .index = get_startup_id,
+        .newindex = set_startup_id,
+    },
+    .{
+        .name = "client_shape_bounding",
+        .index = get_client_shape_bounding,
+    },
+    .{
+        .name = "client_shape_clip",
+        .index = get_client_shape_clip,
+    },
+    .{
+        .name = "client_shape_input",
+        .index = get_client_shape_input,
+    },
+    .{
+        .name = "first_tag",
+        .index = get_first_tag,
+    },
+};
+
+pub var client_class: Class = .{
+    .name = "client",
     .allocator = new,
     .collector = wipe,
     .checker = checker,
-    .parent = window.window_class,
+    .parent = &Window.window_class,
+    .properties = props[0..],
+    .tostring = toString,
 };
 
 pub fn setup(state: *lua.Lua) !void {
@@ -141,15 +342,87 @@ pub fn setup(state: *lua.Lua) !void {
 }
 
 fn new(state: *lua.Lua) ?*Object {
-    return client_class.create(Client, state);
+    const client = client_class.create(Client, state) orelse return null;
+    return &client.window.obj;
 }
 
-fn wipe(obj: *Object) void {}
+fn wipe(obj: *Object) void {
+    std.heap.c_allocator.destroy(from(obj));
+}
 
+fn checker(obj: *Object) bool {
+    const client = from(obj);
+    return client.window.window == Window.none;
+}
+
+fn toString(state: *lua.Lua, obj: *Object) i32 {
+    const client = from(obj);
+    const name = client.name orelse client.alt_name;
+    if (name) |n| {
+        if (n.len > 20) {
+            _ = state.pushString(n[0..20]);
+            _ = state.pushString("...");
+            return 2;
+        } else {
+            _ = state.pushString(n);
+            return 1;
+        }
+    } else {
+        _ = state.pushString("Unknown");
+        return 1;
+    }
+}
+
+pub fn from(obj: *Object) *Client {
+    const window: *Window = @fieldParentPtr("obj", obj);
+    const client: *Client = @fieldParentPtr("window", window);
+    return client;
+}
+// Get all clients into a table.
+//
+// @tparam[opt] integer|screen screen A screen number to filter clients on.
+// @tparam[opt] boolean stacked Return clients in stacking order? (ordered from
+//   top to bottom).
+// @treturn table A table with clients.
+// @staticfct get
+// @usage for _, c in ipairs(client.get()) do
+//     -- do something
+// end
 fn get(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("client `get` not implemented", .{});
-    return 0;
+    var i: i32 = 1;
+    var screen: ?*Screen = null;
+    var stacked = false;
+
+    if (!state.isNoneOrNil(1)) {
+        screen = Screen.checkscreen(state, 1);
+    }
+
+    if (!state.isNoneOrNil(2)) {
+        stacked = lib.checkBoolean(state, 2);
+    }
+
+    state.newTable();
+    if (stacked) {
+        const max = globals.stack.items.len;
+        for (0..max) |j| {
+            const c = globals.stack.items[max - j - 1];
+            if (screen == null or c.screen == screen) {
+                _ = Object.push(state, c);
+                state.rawSetIndex(-2, i);
+                i += 1;
+            }
+        }
+    } else {
+        for (globals.clients.items) |c| {
+            if (screen == null or c.screen == screen) {
+                _ = Object.push(state, c);
+                state.rawSetIndex(-2, i);
+                i += 1;
+            }
+        }
+    }
+
+    return 1;
 }
 
 fn moduleIndex(state: *lua.Lua) i32 {
@@ -235,5 +508,433 @@ fn titlebar_left(state: *lua.Lua) i32 {
 fn get_some_icon(state: *lua.Lua) i32 {
     _ = state;
     std.debug.panic("client `get_some_icon` not implemented", .{});
+    return 0;
+}
+
+fn get_name(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_name` not implemented", .{});
+    return 0;
+}
+fn set_name(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_name` not implemented", .{});
+    return 0;
+}
+fn get_transient_for(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_transient_for` not implemented", .{});
+    return 0;
+}
+fn get_skip_taskbar(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_skip_taskbar` not implemented", .{});
+    return 0;
+}
+fn set_skip_taskbar(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_skip_taskbar` not implemented", .{});
+    return 0;
+}
+fn get_content(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_content` not implemented", .{});
+    return 0;
+}
+fn get_class(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_class` not implemented", .{});
+    return 0;
+}
+fn get_instance(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_instance` not implemented", .{});
+    return 0;
+}
+fn get_role(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_role` not implemented", .{});
+    return 0;
+}
+fn get_pid(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_pid` not implemented", .{});
+    return 0;
+}
+fn get_leader_window(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_leader_window` not implemented", .{});
+    return 0;
+}
+fn get_machine(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_machine` not implemented", .{});
+    return 0;
+}
+fn get_icon_name(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_icon_name` not implemented", .{});
+    return 0;
+}
+fn get_screen(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_screen` not implemented", .{});
+    return 0;
+}
+fn set_screen(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_screen` not implemented", .{});
+    return 0;
+}
+fn get_hidden(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_hidden` not implemented", .{});
+    return 0;
+}
+fn set_hidden(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_hidden` not implemented", .{});
+    return 0;
+}
+fn get_minimized(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_minimized` not implemented", .{});
+    return 0;
+}
+fn set_minimized(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_minimized` not implemented", .{});
+    return 0;
+}
+fn get_fullscreen(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_fullscreen` not implemented", .{});
+    return 0;
+}
+fn set_fullscreen(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_fullscreen` not implemented", .{});
+    return 0;
+}
+fn get_modal(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_modal` not implemented", .{});
+    return 0;
+}
+fn set_modal(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_modal` not implemented", .{});
+    return 0;
+}
+fn get_motif_wm_hints(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_motif_wm_hints` not implemented", .{});
+    return 0;
+}
+fn get_group_window(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_group_window` not implemented", .{});
+    return 0;
+}
+fn get_maximized(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_maximized` not implemented", .{});
+    return 0;
+}
+fn set_maximized(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_maximized` not implemented", .{});
+    return 0;
+}
+fn get_maximized_horizontal(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_maximized_horizontal` not implemented", .{});
+    return 0;
+}
+fn set_maximized_horizontal(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_maximized_horizontal` not implemented", .{});
+    return 0;
+}
+fn get_maximized_vertical(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_maximized_vertical` not implemented", .{});
+    return 0;
+}
+fn set_maximized_vertical(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_maximized_vertical` not implemented", .{});
+    return 0;
+}
+fn get_icon(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_icon` not implemented", .{});
+    return 0;
+}
+fn set_icon(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_icon` not implemented", .{});
+    return 0;
+}
+fn get_icon_sizes(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_icon_sizes` not implemented", .{});
+    return 0;
+}
+fn get_ontop(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_ontop` not implemented", .{});
+    return 0;
+}
+fn set_ontop(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_ontop` not implemented", .{});
+    return 0;
+}
+fn get_above(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_above` not implemented", .{});
+    return 0;
+}
+fn set_above(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_above` not implemented", .{});
+    return 0;
+}
+fn get_below(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_below` not implemented", .{});
+    return 0;
+}
+fn set_below(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_below` not implemented", .{});
+    return 0;
+}
+fn get_sticky(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_sticky` not implemented", .{});
+    return 0;
+}
+fn set_sticky(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_sticky` not implemented", .{});
+    return 0;
+}
+fn get_size_hints_honor(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_size_hints_honor` not implemented", .{});
+    return 0;
+}
+fn set_size_hints_honor(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_size_hints_honor` not implemented", .{});
+    return 0;
+}
+fn get_urgent(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_urgent` not implemented", .{});
+    return 0;
+}
+fn set_urgent(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_urgent` not implemented", .{});
+    return 0;
+}
+fn get_size_hints(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_size_hints` not implemented", .{});
+    return 0;
+}
+fn get_focusable(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_focusable` not implemented", .{});
+    return 0;
+}
+fn set_focusable(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_focusable` not implemented", .{});
+    return 0;
+}
+fn get_shape_bounding(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_shape_bounding` not implemented", .{});
+    return 0;
+}
+fn set_shape_bounding(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_shape_bounding` not implemented", .{});
+    return 0;
+}
+fn get_shape_clip(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_shape_clip` not implemented", .{});
+    return 0;
+}
+fn set_shape_clip(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_shape_clip` not implemented", .{});
+    return 0;
+}
+fn get_shape_input(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_shape_input` not implemented", .{});
+    return 0;
+}
+fn set_shape_input(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_shape_input` not implemented", .{});
+    return 0;
+}
+fn get_startup_id(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_startup_id` not implemented", .{});
+    return 0;
+}
+fn set_startup_id(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `set_startup_id` not implemented", .{});
+    return 0;
+}
+fn get_client_shape_bounding(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_client_shape_bounding` not implemented", .{});
+    return 0;
+}
+fn get_client_shape_clip(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_client_shape_clip` not implemented", .{});
+    return 0;
+}
+fn get_client_shape_input(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_client_shape_input` not implemented", .{});
+    return 0;
+}
+fn get_first_tag(state: *lua.Lua, obj: *Object) i32 {
+    _ = state;
+    _ = obj;
+
+    std.debug.panic("client `get_first_tag` not implemented", .{});
     return 0;
 }

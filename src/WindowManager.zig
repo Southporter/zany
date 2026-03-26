@@ -46,10 +46,11 @@ pub fn init(wm: *WM, gpa: std.mem.Allocator) !void {
 
     const rwm = registy_results.rwm orelse return error.RiverWindowManagerNotFound;
     rwm.setListener(*WM, listener, wm);
+    const compositor = registy_results.compositor orelse return error.WaylandCompositorNotFound;
 
     wm.* = .{
         .globals = .{
-            .compositor = registy_results.compositor orelse return error.WaylandCompositorNotFound,
+            .compositor = compositor,
             .rwm = rwm,
             .rbind = registy_results.rbind orelse return error.RiverXkbBindingsNotFound,
             .display = display,
