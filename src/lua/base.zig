@@ -1,5 +1,6 @@
 const std = @import("std");
 const lua = @import("lua");
+const lib = @import("lib.zig");
 pub const methods = [_]lua.FnReg{
     .{ .name = "_buttons", .func = lua.wrap(buttons) },
     .{ .name = "_keys", .func = lua.wrap(keys) },
@@ -62,15 +63,21 @@ fn get_content(state: *lua.Lua) i32 {
 }
 
 fn size(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("root.size not implemented", .{});
-    return 0;
+    const zany = lib.getZany(state);
+    const root = zany.wm.outputs.first() orelse {
+        std.debug.panic("No outputs found", .{});
+    };
+    state.pushInteger(root.width);
+    state.pushInteger(root.height);
+    return 2;
 }
 
 fn size_mm(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("root.size_mm not implemented", .{});
-    return 0;
+    // TODO: Figure out how to get this from river
+    // For now, push 0 as the MM for width and height
+    state.pushInteger(0);
+    state.pushInteger(0);
+    return 2;
 }
 
 fn tags(state: *lua.Lua) i32 {

@@ -1,6 +1,8 @@
 const std = @import("std");
 const lua = @import("lua");
 const zanylua = @import("../lua.zig");
+const Class = @import("Class.zig");
+const Zany = @import("../root.zig");
 const log = std.log.scoped(.lualib);
 
 pub var dofunction_on_error: ?*const fn (state: *lua.Lua) i32 = null;
@@ -102,4 +104,55 @@ pub fn setUserValue(state: *lua.Lua, index: i32) !void {
         .lua52, .lua53 => state.setUserValue(index),
         else => @compileError("setUserValue not implemented for >= 5.4"),
     };
+}
+
+// Try to use the metatable of an object.
+// \param L The Lua VM state.
+// \param idxobj The index of the object.
+// \param idxfield The index of the field (attribute) to get.
+// \return The number of element pushed on stack.
+pub fn useMetatable(state: *lua.Lua, idxobj: i32, idxfield: i32) i32 {
+    var class: ?*Class = Class.get(state, idxobj);
+    while (class) |c| : (class = class.?.parent) {
+        // Push the class
+        state.pushLightUserdata(c);
+        // Get its metatable from registry
+        _ = state.rawGetTable(lua.registry_index);
+
+        state.pushValue(idxfield);
+        // Get the field in the metatable
+        _ = state.rawGetTable(-2);
+        // Do we have a field like that?
+        if (!state.isNil(-1)) {
+            // Yes, so remove the metatable and return it!
+            state.remove(-2);
+            return 1;
+        }
+        //No, so remove the metatable and its value
+        state.pop(2);
+    }
+
+    return 0;
+}
+
+pub fn getZany(state: *lua.Lua) *Zany {
+    const zany_type = state.getGlobal("__zany") catch unreachable;
+    std.debug.assert(zany_type == .light_userdata);
+    const zany: *Zany = state.toUserdata(Zany, -1) catch unreachable;
+    state.pop(1);
+    return zany;
+}
+
+test "getZany stack effect" {
+    const state = try lua.Lua.init(std.testing.allocator);
+    defer state.deinit();
+
+    var global: Zany = undefined;
+    state.pushLightUserdata(&global);
+    state.setGlobal("__zany");
+
+    const after = getZany(state);
+    try std.testing.expectEqual(&global, after);
+    // Stack effect should be 0
+    try std.testing.expectEqual(0, state.getTop());
 }

@@ -17,18 +17,18 @@ pub fn emit(signal: *Signal, state: *lua.Lua, nargs: i32) void {
     // while executing funcs.
     for (signal.funcs.items) |func| {
         _ = Object.push(state, func);
+    }
 
-        for (0..@intCast(nbfunc)) |i| {
-            const offset: i32 = @intCast(i);
-            // push args
-            for (0..@intCast(nargs)) |_| {
-                state.pushValue(-nargs - nbfunc + offset);
-            }
-            // push first function
+    for (0..@intCast(nbfunc)) |i| {
+        const offset: i32 = @intCast(i);
+        // push args
+        for (0..@intCast(nargs)) |_| {
             state.pushValue(-nargs - nbfunc + offset);
-            state.remove(-nargs - nbfunc - 1 + offset);
-            _ = lib.doFunction(state, nargs, 0);
         }
+        // push first function
+        state.pushValue(-nargs - nbfunc + offset);
+        state.remove(-nargs - nbfunc - 1 + offset);
+        _ = lib.doFunction(state, nargs, 0);
     }
 }
 

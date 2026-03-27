@@ -3,6 +3,7 @@ const lua = @import("lua");
 const wayland = @import("wayland");
 const log = std.log.scoped(.zanywm);
 const Lua = lua.Lua;
+const Screen = @import("screen.zig");
 
 const WM = @This();
 
@@ -29,9 +30,9 @@ state: enum {
     finished,
     crash,
 } = .init,
-seats: std.ArrayList(Seat) = .empty,
-outputs: std.ArrayList(Output) = .empty,
-windows: std.ArrayList(Window) = .empty,
+seats: wl.list.Head(Seat, .link) = undefined,
+outputs: wl.list.Head(Viewport, .link) = undefined,
+windows: wl.list.Head(Window, .link) = undefined,
 gpa: std.mem.Allocator,
 
 pub fn init(wm: *WM, gpa: std.mem.Allocator) !void {
@@ -47,17 +48,21 @@ pub fn init(wm: *WM, gpa: std.mem.Allocator) !void {
     const rwm = registy_results.rwm orelse return error.RiverWindowManagerNotFound;
     rwm.setListener(*WM, listener, wm);
     const compositor = registy_results.compositor orelse return error.WaylandCompositorNotFound;
+    const rbind = registy_results.rbind orelse return error.RiverXkbBindingsNotFound;
 
     wm.* = .{
         .globals = .{
             .compositor = compositor,
             .rwm = rwm,
-            .rbind = registy_results.rbind orelse return error.RiverXkbBindingsNotFound,
+            .rbind = rbind,
             .display = display,
             .registry = registry,
         },
         .gpa = gpa,
     };
+    wm.seats.init();
+    wm.outputs.init();
+    wm.windows.init();
 }
 
 pub fn deinit(wm: *WM) void {
@@ -101,27 +106,29 @@ fn listener(
             const node = evt.id.getNode() catch {
                 return;
             };
-            // This pointer is not stable
-            const window = wm.windows.addOne(wm.gpa) catch {
+            const win = wm.gpa.create(Window) catch {
                 rwm.stop();
                 wm.state = .crash;
                 return;
             };
-            window.* = .{
+            win.* = .{
                 .handle = evt.id,
                 .node = node,
             };
+            wm.windows.append(win);
             evt.id.setListener(*WM, Window.listener, wm);
         },
         .output => |evt| {
-            // This pointer is not stable
-            const output = wm.outputs.addOne(wm.gpa) catch {
+            const viewport = wm.gpa.create(Viewport) catch {
                 rwm.stop();
                 wm.state = .crash;
                 return;
             };
-            output.handle = evt.id;
-            evt.id.setListener(*WM, Output.listener, wm);
+            viewport.* = .{
+                .handle = evt.id,
+            };
+            wm.outputs.append(viewport);
+            evt.id.setListener(*WM, Viewport.listener, wm);
         },
         .seat => |evt| {
             const keybinder = wm.globals.rbind.getSeat(evt.id) catch {
@@ -129,8 +136,7 @@ fn listener(
                 wm.state = .crash;
                 return;
             };
-            // This pointer is not stable
-            const seat = wm.seats.addOne(wm.gpa) catch {
+            const seat = wm.gpa.create(Seat) catch {
                 rwm.stop();
                 wm.state = .crash;
                 return;
@@ -139,6 +145,7 @@ fn listener(
                 .handle = evt.id,
                 .keybinder = keybinder,
             };
+            wm.seats.append(seat);
             evt.id.setListener(*WM, Seat.listener, wm);
             keybinder.setListener(*WM, Seat.keybindListener, wm);
         },
@@ -164,6 +171,10 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, res: *Regi
 
 const Seat = struct {
     handle: *river.SeatV1,
+    link: wl.list.Link = .{
+        .next = null,
+        .prev = null,
+    },
     raw: u32 = 0,
     keybinder: *river.XkbBindingsSeatV1,
     keybinds: std.ArrayList(Keybind) = .empty,
@@ -179,10 +190,9 @@ const Seat = struct {
         seat.handle.destroy();
     }
 
-    fn listener(seat: *river.SeatV1, event: river.SeatV1.Event, wm: *WM) void {
-        const seat_index = wm.findSeat(seat) orelse unreachable;
-        const data = &wm.seats.items[seat_index];
-        log.debug("Seat event for {d}: {any}", .{ seat_index, event });
+    fn listener(handle: *river.SeatV1, event: river.SeatV1.Event, wm: *WM) void {
+        const seat = wm.findSeat(handle) orelse unreachable;
+        log.debug("Seat event for {*}: {any}", .{ seat, event });
         switch (event) {
             .shell_surface_interaction => {},
             .pointer_enter => {},
@@ -191,12 +201,13 @@ const Seat = struct {
             .op_delta => {},
             .op_release => {},
             .wl_seat => |evt| {
-                data.raw = evt.name;
+                seat.raw = evt.name;
             },
             .window_interaction => {},
             .removed => {
-                const s = wm.seats.swapRemove(seat_index);
-                s.deinit();
+                seat.handle.destroy();
+                remove(seat.link);
+                wm.gpa.destroy(seat);
             },
         }
     }
@@ -209,52 +220,156 @@ const Seat = struct {
         }
     }
 };
-fn findSeat(wm: *WM, handle: *river.SeatV1) ?usize {
-    for (wm.seats.items, 0..) |s, index| {
-        if (s.handle == handle) return index;
+fn findSeat(wm: *WM, handle: *river.SeatV1) ?*Seat {
+    var iter = wm.seats.iterator(.forward);
+    while (iter.next()) |seat| {
+        if (seat.handle == handle) {
+            return seat;
+        }
     }
     return null;
 }
 
-const Output = struct {
+/// Keep track of the screen viewport(s) independently from the screen objects.
+///
+/// A viewport is a collection of `outputs` objects and their associated
+/// metadata. This structure is copied into Lua and then further extended from
+/// there. The `id` field allows to differentiate between viewports that share
+/// the same position and dimensions without having to rely on userdata pointer
+/// comparison.
+///
+/// Screen objects are widely used by the public API and imply a very "visible"
+/// concept. A viewport is a subset of what the concerns the "screen" class
+/// previously handled. It is meant to be used by some low level Lua logic to
+/// create screens from Lua rather than from C. This is required to increase the
+/// flexibility of multi-screen setup or when screens are connected and
+/// disconnected often.
+///
+/// Design rationals:
+///
+/// * The structure is not directly shared with Lua to avoid having to use the
+///   slow "miss_handler" and unsafe "valid" systems used by other CAPI objects.
+/// * The `viewport_t` implements a linked-list because its main purpose is to
+///   offers a deduplication algorithm. Random access is never required.
+/// * Everything that can be done in Lua is done in Lua.
+/// * Since the legacy and "new" way to initialize screens share a lot of steps,
+///   the C code is bent to share as much code as possible. This will reduce the
+///   "dead code" and improve code coverage by the tests.
+pub const Viewport = struct {
     handle: *river.OutputV1,
     raw: u32 = 0,
-    x: i32,
-    y: i32,
-    height: isize,
-    width: isize,
+    x: i32 = 0,
+    y: i32 = 0,
+    height: isize = 0,
+    width: isize = 0,
+    screen: *Screen = undefined,
+    link: wl.list.Link = .{
+        .next = null,
+        .prev = null,
+    },
 
     fn listener(output: *river.OutputV1, event: river.OutputV1.Event, wm: *WM) void {
         log.debug("Got output event: {any}", .{event});
-        const index = wm.findOutput(output) orelse {
+        const o = wm.findOutput(output) orelse {
             log.warn("Did not find output. Skipping event: {any}", .{event});
             return;
         };
-        const data = &wm.outputs.items[index];
         switch (event) {
             .position => |evt| {
-                data.x = evt.x;
-                data.y = evt.y;
+                o.x = evt.x;
+                o.y = evt.y;
             },
             .dimensions => |evt| {
-                data.height = evt.height;
-                data.width = evt.width;
+                o.height = evt.height;
+                o.width = evt.width;
             },
             .wl_output => |evt| {
-                data.raw = evt.name;
+                o.raw = evt.name;
             },
             .removed => {
-                const o = wm.outputs.swapRemove(index);
                 o.handle.destroy();
+                remove(o.link);
+                wm.gpa.destroy(o);
+                // TODO: handle signal for removed outputs
             },
         }
     }
 };
-fn findOutput(wm: *WM, handle: *river.OutputV1) ?usize {
-    for (wm.outputs.items, 0..) |*o, index| {
-        if (o.handle == handle) return index;
+fn findOutput(wm: *WM, output: *river.OutputV1) ?*Viewport {
+    var iter = wm.outputs.iterator(.forward);
+    while (iter.next()) |out| {
+        if (out.handle == output) {
+            return out;
+        }
     }
     return null;
+}
+
+fn remove(link: wl.list.Link) void {
+    const prev = link.prev;
+    const next = link.next;
+    if (prev) |p| {
+        p.next = next;
+        if (next) |n| {
+            n.prev = p;
+        }
+    }
+    if (next) |n| {
+        n.prev = prev;
+        if (prev) |p| {
+            p.next = next;
+        }
+    }
+}
+
+test "list remove" {
+    var first = wl.list.Link{
+        .prev = null,
+        .next = null,
+    };
+    var middle = wl.list.Link{
+        .prev = &first,
+        .next = null,
+    };
+    first.next = &middle;
+
+    var last = wl.list.Link{
+        .prev = &middle,
+        .next = null,
+    };
+    middle.next = &last;
+    try std.testing.expectEqual(null, first.prev);
+    try std.testing.expectEqual(&middle, first.next);
+    try std.testing.expectEqual(&first, middle.prev);
+    try std.testing.expectEqual(&last, middle.next);
+    try std.testing.expectEqual(&middle, last.prev);
+    try std.testing.expectEqual(null, last.next);
+
+    remove(first);
+    try std.testing.expectEqual(null, first.prev);
+    try std.testing.expectEqual(&middle, first.next);
+    try std.testing.expectEqual(null, middle.prev);
+    try std.testing.expectEqual(&last, middle.next);
+    try std.testing.expectEqual(&middle, last.prev);
+    try std.testing.expectEqual(null, last.next);
+    middle.prev = &first;
+
+    remove(last);
+    try std.testing.expectEqual(null, first.prev);
+    try std.testing.expectEqual(&middle, first.next);
+    try std.testing.expectEqual(&first, middle.prev);
+    try std.testing.expectEqual(null, middle.next);
+    try std.testing.expectEqual(&middle, last.prev);
+    try std.testing.expectEqual(null, last.next);
+    middle.next = &last;
+
+    remove(middle);
+    try std.testing.expectEqual(null, first.prev);
+    try std.testing.expectEqual(&last, first.next);
+    try std.testing.expectEqual(&first, middle.prev);
+    try std.testing.expectEqual(&last, middle.next);
+    try std.testing.expectEqual(&first, last.prev);
+    try std.testing.expectEqual(null, last.next);
 }
 
 const Window = struct {
@@ -263,14 +378,17 @@ const Window = struct {
     app_id: ?[:0]const u8 = null,
     parent: ?*river.WindowV1 = null,
     node: *river.NodeV1,
+    link: wl.list.Link = .{
+        .prev = null,
+        .next = null,
+    },
 
     fn listener(window: *river.WindowV1, event: river.WindowV1.Event, wm: *WM) void {
         log.debug("Got window event: {any}", .{event});
-        const win_index = wm.findWindow(window) orelse {
+        const win = wm.findWindow(window) orelse {
             log.warn("Unable to find window for event: {any}", .{event});
             return;
         };
-        const data = &wm.windows.items[win_index];
         switch (event) {
             .unreliable_pid => {},
             .minimize_requested => {},
@@ -279,8 +397,10 @@ const Window = struct {
             .fullscreen_requested => {},
             .exit_fullscreen_requested => {},
             .closed => {
-                const win = wm.windows.swapRemove(win_index);
                 win.handle.destroy();
+                remove(win.link);
+                wm.gpa.destroy(win);
+                // TODO: handle signaling for closed window
             },
             .dimensions => {},
             .dimensions_hint => {},
@@ -289,28 +409,32 @@ const Window = struct {
             .pointer_move_requested => {},
             .decoration_hint => {},
             .parent => |evt| {
-                data.parent = evt.parent;
+                win.parent = evt.parent;
             },
             .title => |evt| {
                 if (evt.title) |title| {
-                    data.title = std.mem.span(title);
+                    win.title = std.mem.span(title);
                 } else {
-                    data.title = null;
+                    win.title = null;
                 }
             },
             .app_id => |evt| {
                 if (evt.app_id) |app_id| {
-                    data.app_id = std.mem.span(app_id);
+                    win.app_id = std.mem.span(app_id);
                 } else {
-                    data.app_id = null;
+                    win.app_id = null;
                 }
             },
         }
     }
 };
-fn findWindow(wm: *WM, handle: *river.WindowV1) ?usize {
-    for (wm.windows.items, 0..) |*w, index| {
-        if (w.handle == handle) return index;
+
+fn findWindow(wm: *WM, window: *river.WindowV1) ?*Window {
+    var iter = wm.windows.iterator(.forward);
+    while (iter.next()) |win| {
+        if (win.handle == window) {
+            return win;
+        }
     }
     return null;
 }

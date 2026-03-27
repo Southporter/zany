@@ -158,7 +158,7 @@ fn checkOptions(args: *std.process.ArgIterator, arena: std.mem.Allocator) !Confi
             },
             .screen => {
                 const raw = args.next() orelse return error.InvalidScreenSwitch;
-                config.screen = std.meta.stringToEnum(Config.ScreenCreation, raw) orelse return error.InvalidScreenValue;
+                config.auto_screen = std.meta.stringToEnum(Config.ScreenCreation, raw) orelse return error.InvalidScreenValue;
             },
             .replace => config.replace = true,
             .invalid => return error.UnknownFlag,

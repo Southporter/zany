@@ -27,27 +27,33 @@ pub const Config = struct {
     check: bool = false,
     no_argb: bool = false,
     api_level: std.SemanticVersion = .{ .major = 4, .minor = 3, .patch = 0 },
-    screen: ScreenCreation = .on,
+    auto_screen: ScreenCreation = .on,
     replace: bool = false,
+    ignore_screens: bool = false,
+    startup_errors: []const u8 = "",
     pub const ScreenCreation = enum { on, off };
 };
+var config: Config = undefined;
 
 vm: *Lua,
 wm: WindowManager,
-state: enum { running, stopping, stopped } = .stopped,
+state: enum { starting, running, stopping, stopped } = .starting,
 error_code: u8 = 0,
 
-pub fn init(self: *Zany, gpa: std.mem.Allocator, config: Config) !void {
+pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
     globals.gpa = gpa;
+    self.state = .starting;
     try self.wm.init(gpa);
     errdefer self.wm.deinit();
     const vm = try lua.Lua.init(gpa);
     errdefer vm.deinit();
+    self.vm = vm;
     _ = vm.atPanic(lua.wrap(onPanic));
     vm.openLibs();
     try zany_lua.fixup(vm);
+    config = user_config;
 
-    try addPaths(vm, config);
+    try addPaths(vm);
 
     const awesome_lib: []const lua.FnReg = &.{
         .{ .name = "quit", .func = lua.wrap(quit) },
@@ -106,21 +112,46 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, config: Config) !void {
 
     try zany_lua.initRng(vm);
 
-    screen.screen_class.emitSignal(vm, "scanning", 0);
-    // for (wm.outputs.items, 0..) |output, id| {
-    //     const s = try gpa.create(screen);
-    //     s.* = .{
-    //         .valid = true,
-    //         .output_id = id,
-    //     };
-    //     globals.screens.append(gpa, s);
-    //     screen.screen_class.emitSignal(vm, "")
-    // }
+    // Parse and run configuration file before adding the screens */
+    if (config.auto_screen == .off) {
+        // Disable automatic screen creation, awful.screen has a fallback */
+        config.ignore_screens = true;
+
+        zany_lua.loadRc(vm, config.config) catch |err| {
+            std.process.fatal("couldn't load rc file: {t}", .{err});
+        };
+    }
+
+    // Request initial window/output/seat messages
+    try self.wm.poll();
+    // init screens information */
+    try self.screen_scan();
+
+    // Parse and run configuration file after adding the screens */
+    if (config.auto_screen == .on) {
+        zany_lua.loadRc(vm, config.config) catch |err| {
+            std.process.fatal("couldn't load any rc file: {t}", .{err});
+        };
+    }
+
+    // Both screen scanning mode have this signal, it cannot be in screen_scan
+    //   since the automatic screen generation don't have executed rc.lua yet.
     screen.screen_class.emitSignal(vm, "scanned", 0);
+
+    // Exit if the user doesn't read the instructions properly
+    if (config.auto_screen == .off and globals.screens.items.len == 0)
+        std.debug.panic(
+            \\When -m/--screen is set to \"off\", you **must** create a \
+            \\screen object before or inside the screen \"scanned\" \
+            \\signal. Using AwesomeWM with no screen is **not supported**.
+            \\
+        , .{});
+
+    try self.client_scan();
 
     try zany_lua.loadRc(vm, config.config);
 
-    self.vm = vm;
+    self.state = .running;
 }
 
 pub fn onPanic(L: *Lua) i32 {
@@ -150,7 +181,7 @@ pub fn check(gpa: std.mem.Allocator, file: []const u8) !void {
     defer vm.deinit();
 }
 
-fn addPaths(state: *Lua, config: Config) !void {
+fn addPaths(state: *Lua) !void {
     const pkg_type = try state.getGlobal("package");
     if (pkg_type != .table) {
         log.warn("`package` is not a table", .{});
@@ -369,33 +400,231 @@ fn get_xproperty(state: *Lua) i32 {
     std.debug.panic("awesome.get_xproperty not implemented", .{});
     return 0;
 }
+///
+/// The AwesomeWM version.
+//  * @tfield string version
+//  */
+//
+// /**
+//  * The AwesomeWM release name.
+//  * @tfield string release
+//  */
+//
+// /**
+//  * The AwesomeWM API level.
+//  *
+//  * By default, this matches the major version (first component of the version).
+//  *
+//  * API levels are used to allow newer version of AwesomeWM to alter the behavior
+//  * and subset deprecated APIs. Using an older API level than the current major
+//  * version allows to use legacy `rc.lua` with little porting. However, they won't
+//  * be able to use all the new features. Attempting to use a newer feature along
+//  * with an older API level is not and will not be supported, even if it almost
+//  * works. Keeping up to date with the newer API levels is highly recommended.
+//  *
+//  * Going the other direction, setting an higher API level allows to take
+//  * advantage of experimental feature. It will also be much harsher when it comes
+//  * to deprecation. Setting the API level value beyond `current+3` will treat
+//  * using APIs currently pending deprecation as fatal errors. All new code
+//  * submitted to the upstream AwesomeWM codebase is forbidden to use deprecated
+//  * APIs. Testing your patches with mode and the default config is recommended
+//  * before submitting a patch.
+//  *
+//  * You can use the `-l` command line option or `api-level` modeline key to set
+//  * the API level for your `rc.lua`. This setting is global and read only,
+//  * individual modules cannot set their own API level.
+//  *
+//  * @tfield string api_level
+//  */
+//
+// /**
+//  * The configuration file which has been loaded.
+//  * @tfield string conffile
+//  */
+//
+// /**
+//  * True if we are still in startup, false otherwise.
+//  * @tfield boolean startup
+//  */
+//
+// /**
+//  * Error message for errors that occurred during
+//  *  startup.
+//  * @tfield string startup_errors
+//  */
+//
+// /**
+//  * True if a composite manager is running.
+//  * @tfield boolean composite_manager_running
+//  */
+//
+// /**
+//  * Table mapping between signal numbers and signal identifiers.
+//  * @tfield table unix_signal
+//  */
+//
+// /**
+//  * The hostname of the computer on which we are running.
+//  * @tfield string hostname
+//  */
+//
+// /**
+//  * The path where themes were installed to.
+//  * @tfield string themes_path
+//  */
+//
+// /**
+//  * The path where icons were installed to.
+//  * @tfield string icon_path
+//  */
 fn index(state: *Lua) i32 {
-    _ = state;
-    std.debug.panic("awesome.index not implemented", .{});
+    const zany_type = state.getGlobal("__zany") catch unreachable;
+    std.debug.assert(zany_type == .light_userdata);
+    const zany: *Zany = state.toUserdata(Zany, -1) catch unreachable;
+    state.pop(1);
+
+    // if(luaA_usemetatable(L, 1, 2))
+    //     return 1;
+    if (zany_lib.useMetatable(state, 1, 2) != 0) {
+        return 1;
+    }
+
+    const buf = state.checkString(2);
+    if (std.mem.eql(u8, "conffile", buf)) {
+        // Should NOT be null at this point
+        _ = state.pushString(config.config.?);
+        return 1;
+    }
+    if (std.mem.eql(u8, "version", buf)) {
+        // TODO: Figure out how to do this from build time
+        _ = state.pushString("devel");
+        return 1;
+    }
+    if (std.mem.eql(u8, "release", buf)) {
+        // TODO: Figure out how to do this from build time
+        _ = state.pushString("devel");
+        return 1;
+    }
+
+    if (std.mem.eql(u8, "api_level", buf)) {
+        state.pushInteger(@intCast(config.api_level.major));
+        return 1;
+    }
+    if (std.mem.eql(u8, "startup", buf)) {
+        state.pushBoolean(zany.state == .starting);
+        return 1;
+    }
+    if (std.mem.eql(u8, "_modifiers", buf)) {
+        std.debug.panic("awesome._modifiers not implemented", .{});
+        // luaA_get_modifiers(L);
+    }
+    if (std.mem.eql(u8, "_active_modifiers", buf)) {
+        std.debug.panic("awesome._active_modifiers not implemented", .{});
+        // luaA_get_active_modifiers(L);
+    }
+    if (std.mem.eql(u8, "startup_errors", buf)) {
+        if (config.startup_errors.len == 0) {
+            return 0;
+        }
+        _ = state.pushString(config.startup_errors);
+        return 1;
+    }
+    //
+    // if(A_STREQ(buf, "composite_manager_running"))
+    // {
+    //     lua_pushboolean(L, composite_manager_running());
+    //     return 1;
+    // }
+    //
+    if (std.mem.eql(u8, "hostname", buf)) {
+        var hostname_buf: [64]u8 = undefined;
+        const hostname = std.posix.gethostname(&hostname_buf) catch return 0;
+        _ = state.pushString(hostname);
+        return 1;
+    }
+    //
+    // if(A_STREQ(buf, "themes_path"))
+    // {
+    //     lua_pushliteral(L, AWESOME_THEMES_PATH);
+    //     return 1;
+    // }
+    //
+    // if(A_STREQ(buf, "icon_path"))
+    // {
+    //     lua_pushliteral(L, AWESOME_ICON_PATH);
+    //     return 1;
+    // }
+    //
+    return default_index(state);
+}
+
+fn default_index(state: *lua.Lua) i32 {
+    const id = util.strhash("debug::index::miss");
+    for (globals.signals.items) |*signal| {
+        if (id == signal.id) {
+            signal.emit(state, 2);
+        }
+    }
     return 0;
 }
 fn default_newindex(state: *Lua) i32 {
-    _ = state;
-    std.debug.panic("awesome.default_newindex not implemented", .{});
+    const id = util.strhash("debug::newindex::miss");
+    for (globals.signals.items) |*signal| {
+        if (id == signal.id) {
+            signal.emit(state, 3);
+        }
+    }
     return 0;
 }
 fn xkb_set_layout_group(state: *Lua) i32 {
     _ = state;
-    std.debug.panic("awesome.default_newindex not implemented", .{});
+    std.debug.panic("awesome.xkb_set_layout_group not implemented", .{});
     return 0;
 }
 fn xkb_get_layout_group(state: *Lua) i32 {
     _ = state;
-    std.debug.panic("awesome.default_newindex not implemented", .{});
+    std.debug.panic("awesome.xkb_get_layout_group not implemented", .{});
     return 0;
 }
 fn xkb_get_group_names(state: *Lua) i32 {
     _ = state;
-    std.debug.panic("awesome.default_newindex not implemented", .{});
+    std.debug.panic("awesome.xkb_get_group_names not implemented", .{});
     return 0;
 }
 fn xrdb_get_value(state: *Lua) i32 {
-    _ = state;
-    std.debug.panic("awesome.default_newindex not implemented", .{});
-    return 0;
+    zany_lua.deprecate(@src(), state, "awesome.xrdb_get_value");
+    state.pushNil();
+    return 1;
+}
+
+test {
+    _ = @import("WindowManager.zig");
+    _ = @import("lua/lib.zig");
+}
+
+fn screen_scan(zany: *Zany) !void {
+    screen.screen_class.emitSignal(zany.vm, "scanning", 0);
+    defer screen.screen_class.emitSignal(zany.vm, "scanned", 0);
+    if (config.ignore_screens) return;
+    var iter = zany.wm.outputs.iterator(.forward);
+    while (iter.next()) |viewport| {
+        if (try screen.add(zany.vm)) |s| {
+            viewport.screen = s;
+            s.viewport = viewport;
+            s.lifecycle = .c;
+            s.geometry.x = viewport.x;
+            s.geometry.y = viewport.y;
+            s.geometry.height = @intCast(viewport.height);
+            s.geometry.width = @intCast(viewport.width);
+        }
+    }
+}
+
+fn client_scan(zany: *Zany) !void {
+    client.client_class.emitSignal(zany.vm, "scanning", 0);
+    defer client.client_class.emitSignal(zany.vm, "scanned", 0);
+    var iter = zany.wm.windows.iterator(.forward);
+    while (iter.next()) |win| {
+        log.debug("Scanning Win: {*}", .{win});
+    }
 }

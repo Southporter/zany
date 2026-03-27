@@ -6,6 +6,8 @@ const Object = @import("lua/Object.zig");
 const zany = @import("root.zig");
 const zanylua = @import("./lua.zig");
 const globals = @import("globals.zig");
+const wm = @import("WindowManager.zig");
+const Viewport = wm.Viewport;
 
 const Screen = @This();
 
@@ -16,10 +18,21 @@ const Area = struct {
     height: u32 = 0,
 };
 
+const Xid = enum(u32) {
+    none = 0,
+    fake = 0xffffffff,
+    _,
+};
+const Lifecycle = enum(u8) {
+    user = 0,
+    lua = 1,
+    c = 2,
+};
+
 obj: Object = .{},
 valid: bool = false,
 // /** Who manages the screen lifecycle */
-// screen_lifecycle_t lifecycle;
+lifecycle: Lifecycle = .user,
 // /** Screen geometry */
 geometry: Area = .{},
 // /** Screen workarea */
@@ -27,9 +40,9 @@ workarea: Area = .{},
 // /** The name of the screen */
 name: ?[]const u8 = null,
 // /** Opaque pointer to the viewport */
-// viewport: *Viewport =
+viewport: *Viewport = undefined,
 // Some XID identifying this screen */
-output_id: usize = std.math.maxInt(usize),
+xid: Xid = .none,
 
 var props = [_]Class.Property{
     .{
@@ -206,4 +219,14 @@ pub fn checkscreen(state: *lua.Lua, sidx: i32) ?*Screen {
         const obj = screen_class.checkudata(state, sidx) orelse return null;
         return @fieldParentPtr("obj", obj);
     }
+}
+
+pub fn add(state: *lua.Lua) !?*Screen {
+    const obj = new(state) orelse return null;
+    const screen: *Screen = @fieldParentPtr("obj", obj);
+    _ = Object.ref(state, -1);
+    try globals.screens.append(globals.gpa, screen);
+    screen.xid = .none;
+    screen.lifecycle = .user;
+    return screen;
 }

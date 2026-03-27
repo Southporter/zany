@@ -39,7 +39,7 @@ pub const Property = struct {
 };
 
 pub fn create(class: *Class, comptime T: type, state: *lua.Lua) ?*T {
-    const item = std.heap.c_allocator.create(T) catch return null;
+    const item = state.newUserdata(T);
     item.* = .{};
     class.instances += 1;
 
