@@ -5,6 +5,7 @@ const lib = @import("./lib.zig");
 const util = @import("../util.zig");
 const Signal = @import("../Signal.zig");
 const Object = @import("./Object.zig");
+const globals = @import("../globals.zig");
 
 const log = std.log.scoped(.luaclass);
 
@@ -376,7 +377,7 @@ fn connectSignalFromStack(state: *lua.Lua, class: *Class, name: []const u8, ud: 
         if (signal.id == id) {
             signal.emit(state, 1);
             // /* Register the signal to the CAPI list */
-            signal.funcs.append(std.heap.c_allocator, ref) catch {
+            signal.funcs.append(globals.gpa, ref) catch {
                 log.err("Failed to append signal to list", .{});
                 return;
             };

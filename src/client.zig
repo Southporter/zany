@@ -347,7 +347,7 @@ fn new(state: *lua.Lua) ?*Object {
 }
 
 fn wipe(obj: *Object) void {
-    std.heap.c_allocator.destroy(from(obj));
+    globals.gpa.destroy(from(obj));
 }
 
 fn checker(obj: *Object) bool {

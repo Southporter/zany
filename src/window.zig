@@ -5,6 +5,7 @@ const Class = @import("lua/Class.zig");
 const Object = @import("lua/Object.zig");
 const Button = @import("button.zig");
 const Color = @import("Color.zig");
+const globals = @import("globals.zig");
 
 const Window = @This();
 
@@ -98,7 +99,7 @@ fn new(state: *lua.Lua) ?*Object {
 
 fn wipe(obj: *Object) void {
     const window: *Window = @fieldParentPtr("obj", obj);
-    std.heap.c_allocator.destroy(window);
+    globals.gpa.destroy(window);
 }
 
 fn struts(state: *lua.Lua) i32 {

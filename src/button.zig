@@ -2,6 +2,7 @@ const std = @import("std");
 const lua = @import("lua");
 const Class = @import("lua/Class.zig");
 const Object = @import("lua/Object.zig");
+const globals = @import("globals.zig");
 const wayland = @import("wayland");
 const river = wayland.client.river;
 
@@ -47,7 +48,7 @@ fn new(state: *lua.Lua) ?*Object {
 
 fn wipe(obj: *Object) void {
     const button: *Button = @fieldParentPtr("obj", obj);
-    std.heap.c_allocator.destroy(button);
+    globals.gpa.destroy(button);
 }
 
 fn call(state: *lua.Lua) i32 {

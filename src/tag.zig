@@ -4,6 +4,7 @@ const lib = @import("lua/lib.zig");
 const Class = @import("lua/Class.zig");
 const Object = @import("lua/Object.zig");
 const Client = @import("client.zig");
+const globals = @import("globals.zig");
 
 const Tag = @This();
 obj: Object = .{},
@@ -42,7 +43,7 @@ fn new(state: *lua.Lua) ?*Object {
 
 fn wipe(obj: *Object) void {
     const tag: *Tag = @fieldParentPtr("obj", obj);
-    std.heap.c_allocator.destroy(tag);
+    globals.gpa.destroy(tag);
 }
 
 // Create a new tag.

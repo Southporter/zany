@@ -5,6 +5,7 @@ const zanylua = @import("../lua.zig");
 const lib = @import("./lib.zig");
 const util = @import("../util.zig");
 const Class = @import("Class.zig");
+const globals = @import("../globals.zig");
 const log = std.log.scoped(.object);
 
 const Object = @This();
@@ -99,7 +100,7 @@ fn connectSignalFromStack(state: *lua.Lua, oud: i32, name: [:0]const u8, ud: i32
     for (obj.signals.items) |*signal| {
         if (signal.id == id) {
             const reference = refItem(state, oud, ud) orelse return;
-            signal.funcs.append(std.heap.c_allocator, reference) catch {
+            signal.funcs.append(globals.gpa, reference) catch {
                 log.err("Unable to add signal. Out of memory!", .{});
                 return;
             };

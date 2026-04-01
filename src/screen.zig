@@ -106,9 +106,9 @@ fn new(state: *lua.Lua) ?*Object {
 fn wipe(obj: *Object) void {
     const screen: *Screen = @fieldParentPtr("obj", obj);
     if (screen.name) |name| {
-        std.heap.c_allocator.free(name);
+        globals.gpa.free(name);
     }
-    std.heap.c_allocator.destroy(screen);
+    globals.gpa.destroy(screen);
 }
 
 pub fn count(state: *lua.Lua) i32 {

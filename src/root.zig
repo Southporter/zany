@@ -13,6 +13,7 @@ const window = @import("window.zig");
 const client = @import("client.zig");
 const Object = @import("lua/Object.zig");
 const base = @import("lua/base.zig");
+const drawable = @import("drawable.zig");
 
 const log = std.log.scoped(.zany);
 
@@ -89,7 +90,7 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
     try button.setup(vm);
     try tag.setup(vm);
     try window.setup(vm);
-    // try drawable.setup(vm);
+    try drawable.setup(vm);
     // try drawin.setup(vm);
     try client.setup(vm);
     // /* Export selection getter */
@@ -154,9 +155,12 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
     self.state = .running;
 }
 
-pub fn onPanic(L: *Lua) i32 {
-    log.warn("Lua panicked!!!!!", .{});
-    _ = L;
+pub fn onPanic(state: *Lua) i32 {
+    zany_lua.warn(state, "unprotected error in call to Lua API ({s})",
+         .{state.toString(-1) catch "unknown" });
+    std.debug.dumpCurrentStackTrace(null);
+    zany_lua.warn(state,"restarting awesome", .{});
+    _ = restart(state);
     return 0;
 }
 
@@ -297,7 +301,7 @@ fn connect_signal(state: *Lua) i32 {
     const id = util.strhash(name);
     for (globals.signals.items) |*signal| {
         if (signal.id == id) {
-            signal.funcs.append(std.heap.c_allocator, func) catch {};
+            signal.funcs.append(globals.gpa, func) catch {};
         }
     }
     return 0;

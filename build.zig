@@ -40,7 +40,7 @@ pub fn build(b: *std.Build) void {
     const awesome_lua = awesome.path("lib");
 
     const ziglua = b.dependency("zlua", .{
-        .lang = .luajit,
+        .lang = .lua51,
         .shared = true,
     });
 
