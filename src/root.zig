@@ -14,6 +14,7 @@ const client = @import("client.zig");
 const Object = @import("lua/Object.zig");
 const base = @import("lua/base.zig");
 const drawable = @import("drawable.zig");
+const drawin = @import("drawin.zig");
 
 const log = std.log.scoped(.zany);
 
@@ -91,7 +92,7 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
     try tag.setup(vm);
     try window.setup(vm);
     try drawable.setup(vm);
-    // try drawin.setup(vm);
+    try drawin.setup(vm);
     try client.setup(vm);
     // /* Export selection getter */
     // selection_getter_class_setup(L);
@@ -156,10 +157,9 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
 }
 
 pub fn onPanic(state: *Lua) i32 {
-    zany_lua.warn(state, "unprotected error in call to Lua API ({s})",
-         .{state.toString(-1) catch "unknown" });
+    zany_lua.warn(state, "unprotected error in call to Lua API ({s})", .{state.toString(-1) catch "unknown"});
     std.debug.dumpCurrentStackTrace(null);
-    zany_lua.warn(state,"restarting awesome", .{});
+    zany_lua.warn(state, "restarting awesome", .{});
     _ = restart(state);
     return 0;
 }

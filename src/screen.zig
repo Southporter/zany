@@ -8,15 +8,9 @@ const zanylua = @import("./lua.zig");
 const globals = @import("globals.zig");
 const wm = @import("WindowManager.zig");
 const Viewport = wm.Viewport;
+const Area = @import("geometry.zig").Area;
 
 const Screen = @This();
-
-const Area = struct {
-    x: i32 = 0,
-    y: i32 = 0,
-    width: u32 = 0,
-    height: u32 = 0,
-};
 
 const Xid = enum(u32) {
     none = 0,
