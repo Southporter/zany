@@ -8,7 +8,7 @@ const zanylua = @import("./lua.zig");
 const globals = @import("globals.zig");
 const wm = @import("WindowManager.zig");
 const Viewport = wm.Viewport;
-const Area = @import("geometry.zig").Area;
+const Area = @import("common/Area.zig");
 
 const Screen = @This();
 

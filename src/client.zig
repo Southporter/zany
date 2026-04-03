@@ -6,6 +6,7 @@ const Window = @import("window.zig");
 const Screen = @import("screen.zig");
 const Class = @import("lua/Class.zig");
 const Object = @import("lua/Object.zig");
+const Area = @import("common/Area.zig");
 
 const Client = @This();
 
@@ -25,10 +26,10 @@ instance: ?[:0]const u8 = null,
 // /** Window we use for input focus and no-input clients
 // xcb_window_t nofocus_window;
 // /** Window geometry
-// area_t geometry;
+geometry: Area = .{},
 // /** Old window geometry currently configured in X11
-// area_t x11_client_geometry;
-// area_t x11_frame_geometry;
+window_geometry: Area = .{},
+frame_geometry: Area = .{},
 // /** Got a configure request and have to call client_send_configure() if its ignored?
 got_configure_request: bool = false,
 // Startup ID
@@ -324,7 +325,7 @@ pub fn setup(state: *lua.Lua) !void {
     const meta = [_]lua.FnReg{
         .{ .name = "_keys", .func = lua.wrap(keys) },
         .{ .name = "isvisible", .func = lua.wrap(isvisible) },
-        .{ .name = "geometry", .func = lua.wrap(geometry) },
+        .{ .name = "geometry", .func = lua.wrap(handleGeometry) },
         .{ .name = "apply_size_hints", .func = lua.wrap(apply_size_hints) },
         .{ .name = "tags", .func = lua.wrap(tags) },
         .{ .name = "kill", .func = lua.wrap(kill) },
@@ -445,7 +446,7 @@ fn isvisible(state: *lua.Lua) i32 {
     std.debug.panic("client `isvisible` not implemented", .{});
     return 0;
 }
-fn geometry(state: *lua.Lua) i32 {
+fn handleGeometry(state: *lua.Lua) i32 {
     _ = state;
     std.debug.panic("client `geometry` not implemented", .{});
     return 0;

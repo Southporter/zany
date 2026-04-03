@@ -1,5 +1,6 @@
 const std = @import("std");
 const lua = @import("lua");
+const zanylua = @import("lua.zig");
 const lib = @import("lua/lib.zig");
 const Class = @import("lua/Class.zig");
 const Object = @import("lua/Object.zig");
@@ -169,4 +170,55 @@ pub fn get_type(state: *lua.Lua, obj: *Object) i32 {
     const window: *Window = @fieldParentPtr("obj", obj);
     _ = state.pushString(@tagName(window.kind));
     return 1;
+}
+
+// Set the window type.
+// \param L The Lua VM state.
+// \param window The window object.
+// \return The number of elements pushed on stack.
+pub fn set_type(state: *lua.Lua, obj: *Object) i32 {
+    const win: *Window = @fieldParentPtr("obj", obj);
+    const buf = state.checkString(-1);
+    var kind: Kind = undefined;
+
+    if (std.mem.eql(u8, buf, "desktop")) {
+        kind = .desktop;
+    } else if (std.mem.eql(u8, buf, "dock")) {
+        kind = .dock;
+    } else if (std.mem.eql(u8, buf, "splash")) {
+        kind = .splash;
+    } else if (std.mem.eql(u8, buf, "dialog")) {
+        kind = .dialog;
+    } else if (std.mem.eql(u8, buf, "menu")) {
+        kind = .menu;
+    } else if (std.mem.eql(u8, buf, "toolbar")) {
+        kind = .toolbar;
+    } else if (std.mem.eql(u8, buf, "utility")) {
+        kind = .utility;
+    } else if (std.mem.eql(u8, buf, "dropdown_menu")) {
+        kind = .dropdown_menu;
+    } else if (std.mem.eql(u8, buf, "popup_menu")) {
+        kind = .popup_menu;
+    } else if (std.mem.eql(u8, buf, "tooltip")) {
+        kind = .tooltip;
+    } else if (std.mem.eql(u8, buf, "notification")) {
+        kind = .notification;
+    } else if (std.mem.eql(u8, buf, "combo")) {
+        kind = .combo;
+    } else if (std.mem.eql(u8, buf, "dnd")) {
+        kind = .dnd;
+    } else if (std.mem.eql(u8, buf, "normal")) {
+        kind = .normal;
+    } else {
+        zanylua.warn(state, "Unknown window type '{s}'", .{buf});
+        return 0;
+    }
+    if (win.kind != kind) {
+        win.kind = kind;
+        if (win.window != none) {
+            //         ewmh_update_window_type(w->window, window_translate_type(w->type));
+        }
+        Object.emitSignal(state, -3, "property::type", 0);
+    }
+    return 0;
 }

@@ -8,11 +8,13 @@ const zanylua = @import("./lua.zig");
 const globals = @import("globals.zig");
 const Drawable = @import("drawable.zig");
 const Window = @import("window.zig");
-const Area = @import("geometry.zig");
+const Area = @import("common/Area.zig");
+
+const log = std.log.scoped(.drawin);
 
 const Drawin = @This();
 
-obj: Object = .{},
+window: Window = .{},
 
 ontop: bool = false,
 visible: bool = false,
@@ -117,11 +119,12 @@ pub fn setup(state: *lua.Lua) !void {
 
 fn new(state: *lua.Lua) ?*Object {
     const drawin = drawin_class.create(Drawin, state) orelse return null;
-    return &drawin.obj;
+    return &drawin.window.obj;
 }
 
 fn wipe(obj: *Object) void {
-    const drawin: *Drawin = @fieldParentPtr("obj", obj);
+    const window: *Window = @fieldParentPtr("obj", obj);
+    const drawin: *Drawin = @fieldParentPtr("window", window);
     globals.gpa.destroy(drawin);
 }
 
@@ -142,46 +145,70 @@ fn handleGeometry(state: *lua.Lua) i32 {
 }
 
 fn get_x(state: *lua.Lua, obj: *Object) i32 {
-    const drawin: *Drawin = @fieldParentPtr("obj", obj);
+    const window: *Window = @fieldParentPtr("obj", obj);
+    const drawin: *Drawin = @fieldParentPtr("window", window);
     state.pushInteger(drawin.geometry.x);
     return 1;
 }
 fn set_x(state: *lua.Lua, obj: *Object) i32 {
-    const drawin: *Drawin = @fieldParentPtr("obj", obj);
-    drawin.geometry.x = state.toInteger(1);
+    const window: *Window = @fieldParentPtr("obj", obj);
+    const drawin: *Drawin = @fieldParentPtr("window", window);
+    const new_x = state.toInteger(1) catch {
+        log.warn("Tried to set drawin.geometry.x to non-integer: {t}", .{state.typeOf(1)});
+        return 0;
+    };
+    drawin.geometry.x = @intCast(new_x);
     drawin.geometry_dirty = true;
     return 0;
 }
 fn get_y(state: *lua.Lua, obj: *Object) i32 {
-    const drawin: *Drawin = @fieldParentPtr("obj", obj);
+    const window: *Window = @fieldParentPtr("obj", obj);
+    const drawin: *Drawin = @fieldParentPtr("window", window);
     state.pushInteger(drawin.geometry.y);
     return 1;
 }
 fn set_y(state: *lua.Lua, obj: *Object) i32 {
-    const drawin: *Drawin = @fieldParentPtr("obj", obj);
-    drawin.geometry.y = state.toInteger(1);
+    const window: *Window = @fieldParentPtr("obj", obj);
+    const drawin: *Drawin = @fieldParentPtr("window", window);
+    const new_y = state.toInteger(1) catch {
+        log.warn("Tried to set drawin.geometry.y to non-integer: {t}", .{state.typeOf(1)});
+        return 0;
+    };
+    drawin.geometry.y = @intCast(new_y);
     drawin.geometry_dirty = true;
     return 0;
 }
 fn get_width(state: *lua.Lua, obj: *Object) i32 {
-    const drawin: *Drawin = @fieldParentPtr("obj", obj);
+    const window: *Window = @fieldParentPtr("obj", obj);
+    const drawin: *Drawin = @fieldParentPtr("window", window);
     state.pushInteger(drawin.geometry.width);
     return 1;
 }
 fn set_width(state: *lua.Lua, obj: *Object) i32 {
-    const drawin: *Drawin = @fieldParentPtr("obj", obj);
-    drawin.geometry.width = state.toInteger(1);
+    const window: *Window = @fieldParentPtr("obj", obj);
+    const drawin: *Drawin = @fieldParentPtr("window", window);
+    const new_width = state.toInteger(1) catch {
+        log.warn("Tried to set drawin.geometry.width to non-integer: {t}", .{state.typeOf(1)});
+        return 0;
+    };
+    drawin.geometry.width = @intCast(new_width);
     drawin.geometry_dirty = true;
     return 0;
 }
 fn get_height(state: *lua.Lua, obj: *Object) i32 {
-    const drawin: *Drawin = @fieldParentPtr("obj", obj);
+    const window: *Window = @fieldParentPtr("obj", obj);
+    const drawin: *Drawin = @fieldParentPtr("window", window);
     state.pushInteger(drawin.geometry.height);
     return 1;
 }
 fn set_height(state: *lua.Lua, obj: *Object) i32 {
-    const drawin: *Drawin = @fieldParentPtr("obj", obj);
-    drawin.geometry.height = state.toInteger(1);
+    const window: *Window = @fieldParentPtr("obj", obj);
+    const drawin: *Drawin = @fieldParentPtr("window", window);
+    const new_height = state.toInteger(1) catch {
+        log.warn("Tried to set drawin.geometry.height to non-integer: {t}", .{state.typeOf(1)});
+        return 0;
+    };
+    drawin.geometry.height = @intCast(new_height);
     drawin.geometry_dirty = true;
     return 0;
 }
@@ -224,27 +251,36 @@ fn set_shape_input(state: *lua.Lua, obj: *Object) i32 {
 }
 
 fn getDrawable(state: *lua.Lua, obj: *Object) i32 {
-    const drawin: *Drawin = @fieldParentPtr("obj", obj);
-    state.pushLightUserdata(drawin.drawable);
+    const window: *Window = @fieldParentPtr("obj", obj);
+    const drawin: *Drawin = @fieldParentPtr("window", window);
+    if (drawin.drawable) |drawable| {
+        state.pushLightUserdata(drawable);
+    } else {
+        state.pushNil();
+    }
     return 1;
 }
 fn get_visible(state: *lua.Lua, obj: *Object) i32 {
-    const drawin: *Drawin = @fieldParentPtr("obj", obj);
+    const window: *Window = @fieldParentPtr("obj", obj);
+    const drawin: *Drawin = @fieldParentPtr("window", window);
     state.pushBoolean(drawin.visible);
     return 1;
 }
 fn set_visible(state: *lua.Lua, obj: *Object) i32 {
-    const drawin: *Drawin = @fieldParentPtr("obj", obj);
+    const window: *Window = @fieldParentPtr("obj", obj);
+    const drawin: *Drawin = @fieldParentPtr("window", window);
     drawin.visible = state.toBoolean(1);
     return 0;
 }
 fn get_ontop(state: *lua.Lua, obj: *Object) i32 {
-    const drawin: *Drawin = @fieldParentPtr("obj", obj);
+    const window: *Window = @fieldParentPtr("obj", obj);
+    const drawin: *Drawin = @fieldParentPtr("window", window);
     state.pushBoolean(drawin.ontop);
     return 1;
 }
 fn set_ontop(state: *lua.Lua, obj: *Object) i32 {
-    const drawin: *Drawin = @fieldParentPtr("obj", obj);
+    const window: *Window = @fieldParentPtr("obj", obj);
+    const drawin: *Drawin = @fieldParentPtr("window", window);
     drawin.ontop = state.toBoolean(1);
     return 0;
 }
