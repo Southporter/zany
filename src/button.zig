@@ -2,6 +2,7 @@ const std = @import("std");
 const lua = @import("lua");
 const Class = @import("lua/Class.zig");
 const Object = @import("lua/Object.zig");
+const Key = @import("object/Key.zig");
 const globals = @import("globals.zig");
 const wayland = @import("wayland");
 const river = wayland.client.river;
@@ -68,9 +69,9 @@ fn getButton(state: *lua.Lua, obj: *Object) i32 {
     return 0;
 }
 fn setModifiers(state: *lua.Lua, obj: *Object) i32 {
-    _ = state;
-    _ = obj;
-    std.debug.panic("button.modifiers `set` not implemented", .{});
+    const button: *Button = @fieldParentPtr("obj", obj);
+    button.modifiers = Key.toModifiers(state, -1);
+    Object.emitSignal(state, -3, "property::modifiers", 0);
     return 0;
 }
 fn getModifiers(state: *lua.Lua, obj: *Object) i32 {

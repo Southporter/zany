@@ -15,6 +15,7 @@ const Object = @import("lua/Object.zig");
 const base = @import("lua/base.zig");
 const drawable = @import("drawable.zig");
 const drawin = @import("drawin.zig");
+const Key = @import("object/Key.zig");
 
 const log = std.log.scoped(.zany);
 
@@ -98,6 +99,7 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
     // selection_getter_class_setup(L);
     //
     // /* Export keys */
+    try Key.setup(vm);
     // key_class_setup(L);
     //
     // /* Export selection acquire */
