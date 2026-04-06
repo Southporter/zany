@@ -1,7 +1,7 @@
 const std = @import("std");
 const Signal = @import("Signal.zig");
-const Screen = @import("screen.zig");
-const Client = @import("client.zig");
+const Screen = @import("object/Screen.zig");
+const Client = @import("object/Client.zig");
 
 pub var signals: std.ArrayList(Signal) = .empty;
 pub var screens: std.ArrayList(*Screen) = .empty;

@@ -6,15 +6,15 @@ const zany_lua = @import("./lua.zig");
 const zany_lib = @import("./lua/lib.zig");
 const globals = @import("globals.zig");
 const util = @import("./util.zig");
-const screen = @import("screen.zig");
-const button = @import("button.zig");
-const tag = @import("tag.zig");
-const window = @import("window.zig");
-const client = @import("client.zig");
-const Object = @import("lua/Object.zig");
+const Screen = @import("object/Screen.zig");
+const Button = @import("object/Button.zig");
+const Tag = @import("object/Tag.zig");
+const Window = @import("object/Window.zig");
+const Client = @import("object/Client.zig");
+const Object = @import("object/Object.zig");
 const base = @import("lua/base.zig");
-const drawable = @import("drawable.zig");
-const drawin = @import("drawin.zig");
+const Drawable = @import("drawable.zig");
+const Drawin = @import("object/Drawin.zig");
 const Key = @import("object/Key.zig");
 
 const log = std.log.scoped(.zany);
@@ -88,20 +88,18 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
     try zany_lua.openLib(vm, "root", &base.methods, &base.meta);
     Object.setup(vm);
 
-    try screen.setup(vm);
-    try button.setup(vm);
-    try tag.setup(vm);
-    try window.setup(vm);
-    try drawable.setup(vm);
-    try drawin.setup(vm);
-    try client.setup(vm);
+    try Screen.setup(vm);
+    try Button.setup(vm);
+    try Tag.setup(vm);
+    try Window.setup(vm);
+    try Drawable.setup(vm);
+    try Drawin.setup(vm);
+    try Client.setup(vm);
     // /* Export selection getter */
     // selection_getter_class_setup(L);
     //
-    // /* Export keys */
     try Key.setup(vm);
-    // key_class_setup(L);
-    //
+
     // /* Export selection acquire */
     // selection_acquire_class_setup(L);
     //
@@ -140,7 +138,7 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
 
     // Both screen scanning mode have this signal, it cannot be in screen_scan
     //   since the automatic screen generation don't have executed rc.lua yet.
-    screen.screen_class.emitSignal(vm, "scanned", 0);
+    Screen.screen_class.emitSignal(vm, "scanned", 0);
 
     // Exit if the user doesn't read the instructions properly
     if (config.auto_screen == .off and globals.screens.items.len == 0)
@@ -609,12 +607,12 @@ test {
 }
 
 fn screen_scan(zany: *Zany) !void {
-    screen.screen_class.emitSignal(zany.vm, "scanning", 0);
-    defer screen.screen_class.emitSignal(zany.vm, "scanned", 0);
+    Screen.screen_class.emitSignal(zany.vm, "scanning", 0);
+    defer Screen.screen_class.emitSignal(zany.vm, "scanned", 0);
     if (config.ignore_screens) return;
     var iter = zany.wm.outputs.iterator(.forward);
     while (iter.next()) |viewport| {
-        if (try screen.add(zany.vm)) |s| {
+        if (try Screen.add(zany.vm)) |s| {
             viewport.screen = s;
             s.viewport = viewport;
             s.lifecycle = .c;
@@ -627,8 +625,8 @@ fn screen_scan(zany: *Zany) !void {
 }
 
 fn client_scan(zany: *Zany) !void {
-    client.client_class.emitSignal(zany.vm, "scanning", 0);
-    defer client.client_class.emitSignal(zany.vm, "scanned", 0);
+    Client.client_class.emitSignal(zany.vm, "scanning", 0);
+    defer Client.client_class.emitSignal(zany.vm, "scanned", 0);
     var iter = zany.wm.windows.iterator(.forward);
     while (iter.next()) |win| {
         log.debug("Scanning Win: {*}", .{win});

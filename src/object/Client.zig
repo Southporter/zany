@@ -1,12 +1,12 @@
 const std = @import("std");
 const lua = @import("lua");
-const lib = @import("lua/lib.zig");
-const globals = @import("globals.zig");
-const Window = @import("window.zig");
-const Screen = @import("screen.zig");
-const Class = @import("lua/Class.zig");
-const Object = @import("lua/Object.zig");
-const Area = @import("common/Area.zig");
+const lib = @import("../lua/lib.zig");
+const globals = @import("../globals.zig");
+const Window = @import("Window.zig");
+const Screen = @import("Screen.zig");
+const Class = @import("Class.zig");
+const Object = @import("Object.zig");
+const Area = @import("../common/Area.zig");
 
 const Client = @This();
 

@@ -1,7 +1,7 @@
 const std = @import("std");
 const lua = @import("lua");
 const zanylua = @import("../lua.zig");
-const Class = @import("Class.zig");
+const Class = @import("../object/Class.zig");
 const Zany = @import("../root.zig");
 const log = std.log.scoped(.lualib);
 

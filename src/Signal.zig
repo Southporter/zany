@@ -2,7 +2,7 @@ const std = @import("std");
 const lua = @import("lua");
 const zanylua = @import("./lua.zig");
 const lib = @import("./lua/lib.zig");
-const Object = @import("./lua/Object.zig");
+const Object = @import("./object/Object.zig");
 
 const Signal = @This();
 

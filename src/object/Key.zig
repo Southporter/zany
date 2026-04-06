@@ -5,8 +5,8 @@ const zanylib = @import("../lua/lib.zig");
 const log = std.log.scoped(.key);
 const wayland = @import("wayland");
 const Modifiers = wayland.client.river.SeatV1.Modifiers;
-const Object = @import("../lua/Object.zig");
-const Class = @import("../lua/Class.zig");
+const Object = @import("Object.zig");
+const Class = @import("Class.zig");
 const globals = @import("../globals.zig");
 
 const Key = @This();

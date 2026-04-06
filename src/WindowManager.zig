@@ -3,7 +3,7 @@ const lua = @import("lua");
 const wayland = @import("wayland");
 const log = std.log.scoped(.zanywm);
 const Lua = lua.Lua;
-const Screen = @import("screen.zig");
+const Screen = @import("object/Screen.zig");
 
 const WM = @This();
 

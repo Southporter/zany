@@ -1,10 +1,10 @@
 const std = @import("std");
 const lua = @import("lua");
-const lib = @import("lua/lib.zig");
-const Class = @import("lua/Class.zig");
-const Object = @import("lua/Object.zig");
-const Client = @import("client.zig");
-const globals = @import("globals.zig");
+const lib = @import("../lua/lib.zig");
+const Class = @import("Class.zig");
+const Object = @import("Object.zig");
+const Client = @import("Client.zig");
+const globals = @import("../globals.zig");
 
 const Tag = @This();
 obj: Object = .{},

@@ -1,9 +1,9 @@
 const std = @import("std");
 const lua = @import("lua");
-const Class = @import("lua/Class.zig");
-const Object = @import("lua/Object.zig");
-const Key = @import("object/Key.zig");
-const globals = @import("globals.zig");
+const Class = @import("Class.zig");
+const Object = @import("Object.zig");
+const Key = @import("Key.zig");
+const globals = @import("../globals.zig");
 const wayland = @import("wayland");
 const river = wayland.client.river;
 

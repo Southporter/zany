@@ -1,12 +1,12 @@
 const std = @import("std");
 const lua = @import("lua");
-const zanylua = @import("lua.zig");
-const lib = @import("lua/lib.zig");
-const Class = @import("lua/Class.zig");
-const Object = @import("lua/Object.zig");
-const Button = @import("button.zig");
-const Color = @import("Color.zig");
-const globals = @import("globals.zig");
+const zanylua = @import("../lua.zig");
+const lib = @import("../lua/lib.zig");
+const Class = @import("Class.zig");
+const Object = @import("Object.zig");
+const Button = @import("Button.zig");
+const Color = @import("../Color.zig");
+const globals = @import("../globals.zig");
 
 const Window = @This();
 

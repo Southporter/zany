@@ -2,7 +2,7 @@ const std = @import("std");
 const lua = @import("lua");
 const log = std.log.scoped(.zanyLua);
 
-const Class = @import("./lua/Class.zig");
+const Class = @import("./object/Class.zig");
 pub const Signal = @import("./Signal.zig");
 
 const Lua = lua.Lua;
