@@ -171,7 +171,7 @@ pub fn initRng(state: *Lua) !void {
 
 pub fn loadRc(state: *Lua, config_path: ?[:0]const u8) !void {
     const path = config_path orelse std.process.fatal("Config path fallback not implemented!!!!!!!!!", .{});
-    state.doFile(path) catch |err| {
+    state.loadFile(path) catch |err| {
         const msg = state.toString(-1) catch |err2| return err2;
         log.err("Failed to load from file: {t} - {s}", .{ err, msg });
         return err;
@@ -193,27 +193,34 @@ pub fn loadRc(state: *Lua, config_path: ?[:0]const u8) !void {
 }
 
 fn onError(state: *Lua) i32 {
-    _ = state;
-    log.err("Hit onError", .{});
-    // TODO: Convert this over
-    // // Convert error to string, to prevent a follow-up error with lua_concat.
-    // luaA_tolstring(L, -1, NULL);
-    //
-    // /* duplicate string error */
-    // lua_pushvalue(L, -1);
-    // /* emit error signal */
-    // signal_object_emit(L, &global_signals, "debug::error", 1);
-    //
-    // if(!luaL_dostring(L, "return debug.traceback(\"error while running function!\", 3)"))
-    // {
-    //     /* Move traceback before error */
-    //     lua_insert(L, -2);
-    //     /* Insert sentence */
-    //     lua_pushliteral(L, "\nerror: ");
-    //     /* Move it before error */
-    //     lua_insert(L, -2);
-    //     lua_concat(L, 3);
-    // }
+    switch (lua.lang) {
+        .luajit, .lua51 => {
+            _ = state.getGlobal("debug") catch null;
+            _ = state.getField(-1, "traceback");
+            _ = state.pushString("error while running function!");
+            state.pushInteger(3);
+            state.protectedCall(.{
+                .args = 2,
+                .results = 1,
+                .msg_handler = 0,
+            }) catch {
+                const err = state.toString(-1) catch "Unknown error";
+                log.err("Hit onError: {s}", .{err});
+                state.pop(2);
+                return 0;
+            };
+            const traceback = state.toString(-1) catch "";
+            const err = state.toString(-2) catch "Unknown error";
+            log.err("Hit onError\n{s}\nerror: {s}", .{ traceback, err });
+            state.pop(2);
+        },
+        else => {
+            state.traceback(state, null, 2);
+            const traceback = state.toString(-1) catch "Failed to get traceback";
+            log.err("Hit onError\n{s}", .{traceback});
+            state.pop(1);
+        },
+    }
     return 0;
 }
 
