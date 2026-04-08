@@ -1,6 +1,10 @@
 const std = @import("std");
 const lua = @import("lua");
 const lib = @import("lib.zig");
+const luaZ = @import("../lua.zig");
+const CursorShape = @import("wayland").client.wp.CursorShapeDeviceV1.Shape;
+const log = std.log.scoped(.root);
+
 pub const methods = [_]lua.FnReg{
     .{ .name = "_buttons", .func = lua.wrap(buttons) },
     .{ .name = "_keys", .func = lua.wrap(keys) },
@@ -32,9 +36,34 @@ fn keys(state: *lua.Lua) i32 {
     return 0;
 }
 
+// Set the root cursor
+//
+// The possible values are:
+//
+//@DOC_cursor_c_COMMON@
+//
+// @param cursor_name A X cursor name.
+// @function cursor
+//
 fn cursor(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("root.cursor not implemented", .{});
+    const cursor_name = state.checkString(1);
+    // TODO: add translation from awesome cursors to CursorShape
+    const cursor_shape = std.meta.stringToEnum(CursorShape, cursor_name);
+
+    if (cursor_shape) |shape| {
+        log.debug("Changing cursor shape to {t}", .{shape});
+        // uint32_t change_win_vals[] = { xcursor_new(globalconf.cursor_ctx, cursor_font) };
+        //
+        // xcb_change_window_attributes(globalconf.connection,
+        //                              globalconf.screen->root,
+        //                              XCB_CW_CURSOR,
+        //                              change_win_vals);
+    } else {
+        log.warn("invalid cursor {s}", .{cursor_name});
+        // TODO: Put this back after translation is in place
+        // luaZ.warn(state, "invalid cursor {s}", .{cursor_name});
+    }
+
     return 0;
 }
 
