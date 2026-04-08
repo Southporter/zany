@@ -52,6 +52,7 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
     errdefer vm.deinit();
     self.vm = vm;
     _ = vm.atPanic(lua.wrap(onPanic));
+    zany_lib.dofunction_on_error = onError;
     vm.openLibs();
     try zany_lua.fixup(vm);
     config = user_config;
@@ -138,7 +139,7 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
 
     // Both screen scanning mode have this signal, it cannot be in screen_scan
     //   since the automatic screen generation don't have executed rc.lua yet.
-    Screen.screen_class.emitSignal(vm, "scanned", 0);
+    Screen.screen_class.signals.emit(vm, "scanned", 0);
 
     // Exit if the user doesn't read the instructions properly
     if (config.auto_screen == .off and globals.screens.items.len == 0)
@@ -298,12 +299,7 @@ fn connect_signal(state: *Lua) i32 {
 
     const func = Object.ref(state, 2) orelse return 0;
 
-    const id = util.strhash(name);
-    for (globals.signals.items) |*signal| {
-        if (signal.id == id) {
-            signal.funcs.append(globals.gpa, func) catch {};
-        }
-    }
+    globals.signals.connect(name, func);
     return 0;
 }
 fn disconnect_signal(state: *Lua) i32 {
@@ -563,21 +559,11 @@ fn index(state: *Lua) i32 {
 }
 
 fn default_index(state: *lua.Lua) i32 {
-    const id = util.strhash("debug::index::miss");
-    for (globals.signals.items) |*signal| {
-        if (id == signal.id) {
-            signal.emit(state, 2);
-        }
-    }
+    globals.signals.emit(state, "debug::index::miss", 2);
     return 0;
 }
 fn default_newindex(state: *Lua) i32 {
-    const id = util.strhash("debug::newindex::miss");
-    for (globals.signals.items) |*signal| {
-        if (id == signal.id) {
-            signal.emit(state, 3);
-        }
-    }
+    globals.signals.emit(state, "debug::newindex::miss", 3);
     return 0;
 }
 fn xkb_set_layout_group(state: *Lua) i32 {
@@ -607,8 +593,8 @@ test {
 }
 
 fn screen_scan(zany: *Zany) !void {
-    Screen.screen_class.emitSignal(zany.vm, "scanning", 0);
-    defer Screen.screen_class.emitSignal(zany.vm, "scanned", 0);
+    Screen.screen_class.signals.emit(zany.vm, "scanning", 0);
+    defer Screen.screen_class.signals.emit(zany.vm, "scanned", 0);
     if (config.ignore_screens) return;
     var iter = zany.wm.outputs.iterator(.forward);
     while (iter.next()) |viewport| {
@@ -625,10 +611,29 @@ fn screen_scan(zany: *Zany) !void {
 }
 
 fn client_scan(zany: *Zany) !void {
-    Client.client_class.emitSignal(zany.vm, "scanning", 0);
-    defer Client.client_class.emitSignal(zany.vm, "scanned", 0);
+    Client.client_class.signals.emit(zany.vm, "scanning", 0);
+    defer Client.client_class.signals.emit(zany.vm, "scanned", 0);
     var iter = zany.wm.windows.iterator(.forward);
     while (iter.next()) |win| {
         log.debug("Scanning Win: {*}", .{win});
     }
+}
+
+fn onError(state: *lua.Lua) i32 {
+    // Convert error to string, to prevent a follow-up error with lua_concat. */
+    const str = state.toString(-1) catch "";
+    log.err("Error: {s}", .{str});
+    // duplicate string error */
+    state.pushValue(-1);
+    // emit error signal */
+    globals.signals.emit(state, "debug::error", 1);
+
+    state.doString("return debug.traceback(\"error while running function!\", 3)") catch {
+        return 1;
+    };
+    state.insert(-2);
+    _ = state.pushStringZ("\nerror: ");
+    state.insert(-2);
+    state.concat(3);
+    return 1;
 }

@@ -1,9 +1,9 @@
 const std = @import("std");
-const Signal = @import("Signal.zig");
+const Signals = @import("Signals.zig");
 const Screen = @import("object/Screen.zig");
 const Client = @import("object/Client.zig");
 
-pub var signals: std.ArrayList(Signal) = .empty;
+pub var signals: Signals = .{};
 pub var screens: std.ArrayList(*Screen) = .empty;
 pub var clients: std.ArrayList(*Client) = .empty;
 pub var stack: std.ArrayList(*Client) = .empty;

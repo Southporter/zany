@@ -78,8 +78,13 @@ pub fn toModifiers(state: *lua.Lua, ud: i32) Modifiers {
 
     for (0..len) |i| {
         const kind = state.rawGetIndex(ud, @intCast(i));
+        defer state.pop(1);
+        if (kind == .nil) {
+            continue;
+        }
         std.debug.assert(kind == .string);
         const key = state.checkString(-1);
+        log.debug("Key: {s}", .{key});
         if (std.mem.eql(u8, key, "Mod1")) {
             mods.mod1 = true;
         } else if (std.mem.eql(u8, key, "Mod3")) {
@@ -95,7 +100,6 @@ pub fn toModifiers(state: *lua.Lua, ud: i32) Modifiers {
         } else {
             log.warn("Key in `toModifiers` not handled: {s}", .{key});
         }
-        state.pop(1);
     }
     return mods;
 }
@@ -103,7 +107,7 @@ pub fn toModifiers(state: *lua.Lua, ud: i32) Modifiers {
 // \param L The Lua VM state.
 // \param modifiers The modifier.
 // \return The number of elements pushed on stack.
-fn pushModifiers(state: *lua.Lua, modifiers: Modifiers) i32 {
+pub fn pushModifiers(state: *lua.Lua, modifiers: Modifiers) i32 {
     state.newTable();
     {
         var i: i32 = 1;

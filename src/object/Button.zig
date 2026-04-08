@@ -6,12 +6,13 @@ const Key = @import("Key.zig");
 const globals = @import("../globals.zig");
 const wayland = @import("wayland");
 const river = wayland.client.river;
+const log = std.log.scoped(.button);
 
 const Button = @This();
 
 obj: Object = .{},
 modifiers: river.SeatV1.Modifiers = .{},
-button: u32 = 0, //TODO: fix with river equivalent
+button: c_longlong = 0, //TODO: fix with river equivalent
 
 var props = [_]Class.Property{
     .{
@@ -57,15 +58,14 @@ fn call(state: *lua.Lua) i32 {
 }
 
 fn setButton(state: *lua.Lua, obj: *Object) i32 {
-    _ = state;
-    _ = obj;
-    std.debug.panic("button.button `set` not implemented", .{});
+    const button: *Button = @fieldParentPtr("obj", obj);
+    button.button = state.checkInteger(-1);
+    Object.emitSignal(state, -3, "property::button", 0);
     return 0;
 }
 fn getButton(state: *lua.Lua, obj: *Object) i32 {
-    _ = state;
-    _ = obj;
-    std.debug.panic("button.button `get` not implemented", .{});
+    const button: *Button = @fieldParentPtr("obj", obj);
+    state.pushInteger(button.button);
     return 0;
 }
 fn setModifiers(state: *lua.Lua, obj: *Object) i32 {
@@ -75,8 +75,6 @@ fn setModifiers(state: *lua.Lua, obj: *Object) i32 {
     return 0;
 }
 fn getModifiers(state: *lua.Lua, obj: *Object) i32 {
-    _ = state;
-    _ = obj;
-    std.debug.panic("button.modifiers `get` not implemented", .{});
-    return 0;
+    const button: *Button = @fieldParentPtr("obj", obj);
+    return Key.pushModifiers(state, button.modifiers);
 }

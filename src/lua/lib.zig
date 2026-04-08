@@ -135,6 +135,39 @@ pub fn useMetatable(state: *lua.Lua, idxobj: i32, idxfield: i32) i32 {
     return 0;
 }
 
+//* Register a function.
+// \param L The Lua stack.
+// \param idx Index of the function in the stack.
+// \param fct A int address: it will be filled with the int
+// registered. If the address points to an already registered function, it will
+// be unregistered.
+// \return luaA_register value.
+//
+// from luaa.c luaA_registerfct
+pub fn registerFct(state: *lua.Lua, idx: i32, fct: *i32) i32 {
+    checkFunction(state, idx);
+
+    return register(state, idx, fct);
+}
+//* Register an Lua object.
+// \param L The Lua stack.
+// \param idx Index of the object in the stack.
+// \param ref A int address: it will be filled with the int
+// registered. If the address points to an already registered object, it will
+// be unregistered.
+// \return Always 0.
+// from luaa.c luaA_register
+fn register(state: *lua.Lua, idx: i32, ref: *i32) i32 {
+    state.pushValue(idx);
+    if (ref.* != lua.ref_nil)
+        state.unref(lua.registry_index, ref.*);
+    ref.* = state.ref(lua.registry_index) catch {
+        std.debug.panic("Failed to ref in `register`", .{});
+        return lua.ref_nil;
+    };
+    return 0;
+}
+
 pub fn getZany(state: *lua.Lua) *Zany {
     const zany_type = state.getGlobal("__zany") catch unreachable;
     std.debug.assert(zany_type == .light_userdata);

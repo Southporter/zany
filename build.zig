@@ -67,6 +67,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
         .use_llvm = true,
+        .use_lld = true,
     });
 
     b.installArtifact(exe);
