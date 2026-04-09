@@ -1,11 +1,12 @@
 const std = @import("std");
 const lua = @import("lua");
-const lib = @import("lib.zig");
+const zanylib = @import("lib.zig");
 const luaZ = @import("../lua.zig");
+const cursorlib = @import("./cursor.zig");
 const CursorShape = @import("wayland").client.wp.CursorShapeDeviceV1.Shape;
 const log = std.log.scoped(.root);
 
-pub const methods = [_]lua.FnReg{
+pub const lib = [_]lua.FnReg{
     .{ .name = "_buttons", .func = lua.wrap(buttons) },
     .{ .name = "_keys", .func = lua.wrap(keys) },
     .{ .name = "cursor", .func = lua.wrap(cursor) },
@@ -22,8 +23,6 @@ pub const methods = [_]lua.FnReg{
     .{ .name = "set_call_handler", .func = lua.wrap(set_call_handler) },
     .{ .name = "set_newindex_miss_handler", .func = lua.wrap(set_newindex_miss_handler) },
 };
-
-pub const meta = [_]lua.FnReg{};
 
 fn buttons(state: *lua.Lua) i32 {
     _ = state;
@@ -48,22 +47,20 @@ fn keys(state: *lua.Lua) i32 {
 fn cursor(state: *lua.Lua) i32 {
     const cursor_name = state.checkString(1);
     // TODO: add translation from awesome cursors to CursorShape
-    const cursor_shape = std.meta.stringToEnum(CursorShape, cursor_name);
+    const cursor_shape = cursorlib.nameToShape(cursor_name) catch {
+        luaZ.warn(state, "invalid cursor {s}", .{cursor_name});
+        return 0;
+    };
 
-    if (cursor_shape) |shape| {
-        log.debug("Changing cursor shape to {t}", .{shape});
-        // uint32_t change_win_vals[] = { xcursor_new(globalconf.cursor_ctx, cursor_font) };
-        //
-        // xcb_change_window_attributes(globalconf.connection,
-        //                              globalconf.screen->root,
-        //                              XCB_CW_CURSOR,
-        //                              change_win_vals);
-    } else {
-        log.warn("invalid cursor {s}", .{cursor_name});
-        // TODO: Put this back after translation is in place
-        // luaZ.warn(state, "invalid cursor {s}", .{cursor_name});
+    log.debug("Changing cursor shape to {t}", .{cursor_shape});
+    const zany = zanylib.getZany(state);
+    var seat_iter = zany.wm.seats.iterator(.forward);
+    while (seat_iter.next()) |seat| {
+        if (seat.cursor) |device| {
+            const id = device.pointer.getVersion();
+            device.shape_device.setShape(id, cursor_shape);
+        }
     }
-
     return 0;
 }
 
@@ -92,7 +89,7 @@ fn get_content(state: *lua.Lua) i32 {
 }
 
 fn size(state: *lua.Lua) i32 {
-    const zany = lib.getZany(state);
+    const zany = zanylib.getZany(state);
     const root = zany.wm.outputs.first() orelse {
         std.debug.panic("No outputs found", .{});
     };

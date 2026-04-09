@@ -1,6 +1,7 @@
 const std = @import("std");
 const lua = @import("lua");
 const log = std.log.scoped(.zanyLua);
+const SIG = std.posix.SIG;
 
 const Class = @import("./object/Class.zig");
 pub const Signals = @import("./Signals.zig");
@@ -52,6 +53,21 @@ fn customType(state: *Lua) i32 {
     return 1;
 }
 
+pub fn registerLib(state: *Lua, name: [:0]const u8, lib: []const lua.FnReg) void {
+    switch (lua.lang) {
+        .lua51, .luajit => {
+            state.registerFns(name, lib);
+        },
+        .lua52, .lua53, .lua54 => {
+            state.newTable();
+            state.setFuncs(lib, 0);
+            state.pushValue(-1);
+            state.setGlobal(name);
+        },
+        else => unreachable,
+    }
+}
+
 pub fn openLib(state: *Lua, name: [:0]const u8, methods: []const lua.FnReg, meta: []const lua.FnReg) !void {
     try state.newMetatable(name);
     state.pushValue(-1); // Dup metatable
@@ -73,67 +89,68 @@ pub fn registerFns(state: *Lua, name: [:0]const u8, methods: []const lua.FnReg) 
 }
 
 pub fn setupSignals(state: *Lua, global: [:0]const u8) !void {
-    try state.getGlobal(global);
-    try state.pushString("unix_signal");
-    try state.newTable();
-    if (@hasField(std.posix.SIG, "IOT")) try setupSignal(state, .IOT);
-    if (@hasField(std.posix.SIG, "EMT")) try setupSignal(state, .EMT);
-    if (@hasField(std.posix.SIG, "STKFLT")) try setupSignal(state, .STKFLT);
-    if (@hasField(std.posix.SIG, "IO")) try setupSignal(state, .IO);
-    if (@hasField(std.posix.SIG, "CLD")) try setupSignal(state, .CLD);
-    if (@hasField(std.posix.SIG, "PWR")) try setupSignal(state, .PWR);
-    if (@hasField(std.posix.SIG, "INFO")) try setupSignal(state, .INFO);
-    if (@hasField(std.posix.SIG, "LOST")) try setupSignal(state, .LOST);
-    if (@hasField(std.posix.SIG, "WINCH")) try setupSignal(state, .WINCH);
-    if (@hasField(std.posix.SIG, "UNUSED")) try setupSignal(state, .UNUSED);
+    const kind = try state.getGlobal(global);
+    std.debug.assert(kind == .table);
+    _ = state.pushString("unix_signal");
+    state.newTable();
+    if (@hasField(std.posix.SIG, "IOT")) try setupSignal(state, "SIGIOT", SIG.IOT);
+    if (@hasField(std.posix.SIG, "EMT")) try setupSignal(state, "SIGEMT", SIG.EMT);
+    if (@hasField(std.posix.SIG, "STKFLT")) try setupSignal(state, "SIGSTKFLT", SIG.STKFLT);
+    if (@hasField(std.posix.SIG, "IO")) try setupSignal(state, "SIGIO", SIG.IO);
+    if (@hasField(std.posix.SIG, "CLD")) try setupSignal(state, "SIGCLD", SIG.CLD);
+    if (@hasField(std.posix.SIG, "PWR")) try setupSignal(state, "SIGPWR", SIG.PWR);
+    if (@hasField(std.posix.SIG, "INFO")) try setupSignal(state, "SIGINFO", SIG.INFO);
+    if (@hasField(std.posix.SIG, "LOST")) try setupSignal(state, "SIGLOST", SIG.LOST);
+    if (@hasField(std.posix.SIG, "WINCH")) try setupSignal(state, "SIGWINCH", SIG.WINCH);
+    if (@hasField(std.posix.SIG, "UNUSED")) try setupSignal(state, "SIGUNUSED", SIG.UNUSED);
 
     // POSIX.1-1990, according to man 7 signal
-    try setupSignal(.HUP);
-    try setupSignal(.INT);
-    try setupSignal(.QUIT);
-    try setupSignal(.ILL);
-    try setupSignal(.ABRT);
-    try setupSignal(.FPE);
-    try setupSignal(.KILL);
-    try setupSignal(.SEGV);
-    try setupSignal(.PIPE);
-    try setupSignal(.ALRM);
-    try setupSignal(.TERM);
-    try setupSignal(.USR1);
-    try setupSignal(.USR2);
-    try setupSignal(.CHLD);
-    try setupSignal(.CONT);
-    try setupSignal(.STOP);
-    try setupSignal(.TSTP);
-    try setupSignal(.TTIN);
-    try setupSignal(.TTOU);
+    try setupSignal(state, "SIGHUP", SIG.HUP);
+    try setupSignal(state, "SIGINT", SIG.INT);
+    try setupSignal(state, "SIGQUIT", SIG.QUIT);
+    try setupSignal(state, "SIGILL", SIG.ILL);
+    try setupSignal(state, "SIGABRT", SIG.ABRT);
+    try setupSignal(state, "SIGFPE", SIG.FPE);
+    try setupSignal(state, "SIGKILL", SIG.KILL);
+    try setupSignal(state, "SIGSEGV", SIG.SEGV);
+    try setupSignal(state, "SIGPIPE", SIG.PIPE);
+    try setupSignal(state, "SIGALRM", SIG.ALRM);
+    try setupSignal(state, "SIGTERM", SIG.TERM);
+    try setupSignal(state, "SIGUSR1", SIG.USR1);
+    try setupSignal(state, "SIGUSR2", SIG.USR2);
+    try setupSignal(state, "SIGCHLD", SIG.CHLD);
+    try setupSignal(state, "SIGCONT", SIG.CONT);
+    try setupSignal(state, "SIGSTOP", SIG.STOP);
+    try setupSignal(state, "SIGTSTP", SIG.TSTP);
+    try setupSignal(state, "SIGTTIN", SIG.TTIN);
+    try setupSignal(state, "SIGTTOU", SIG.TTOU);
 
     // POSIX.1-2001, according to man 7 signal */
-    try setupSignal(.BUS);
+    try setupSignal(state, "SIGBUS", SIG.BUS);
     // Some Operating Systems doesn't have SIGPOLL (e.g. FreeBSD) */
-    if (@hasField(std.posix.SIG, "POLL")) try setupSignal(state, .POLL);
+    if (@hasField(std.posix.SIG, "POLL")) try setupSignal(state, "SIGPOLL", SIG.POLL);
 
-    try setupSignal(.PROF);
-    try setupSignal(.SYS);
-    try setupSignal(.TRAP);
-    try setupSignal(.URG);
-    try setupSignal(.VTALRM);
-    try setupSignal(.XCPU);
-    try setupSignal(.XFSZ);
+    try setupSignal(state, "SIGPROF", SIG.PROF);
+    try setupSignal(state, "SIGSYS", SIG.SYS);
+    try setupSignal(state, "SIGTRAP", SIG.TRAP);
+    try setupSignal(state, "SIGURG", SIG.URG);
+    try setupSignal(state, "SIGVTALRM", SIG.VTALRM);
+    try setupSignal(state, "SIGXCPU", SIG.XCPU);
+    try setupSignal(state, "SIGXFSZ", SIG.XFSZ);
 
     // Set awesome.signal to the table we just created, key was already pushed
-    try state.rawSetTable(-3);
+    state.rawSetTable(-3);
     // pop `awesome`;
     state.pop(1);
 }
-fn setupSignal(state: *Lua, sig: std.posix.SIG) !void {
+fn setupSignal(state: *Lua, name: [:0]const u8, sig: i32) !void {
     // Set awesome.unix_signal["SIGSTOP"] = 42
-    try state.pushInteger(sig);
-    state.setField(-2, @tagName(sig));
+    state.pushInteger(sig);
+    state.setField(-2, name);
 
     // Set awesome.unix_signal[42] = "SIGSTOP"
     state.pushInteger(sig);
-    state.pushString(@tagName(sig));
+    _ = state.pushString(name);
     state.setTable(-3);
 }
 

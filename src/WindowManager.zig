@@ -4,20 +4,27 @@ const wayland = @import("wayland");
 const log = std.log.scoped(.zanywm);
 const Lua = lua.Lua;
 const Screen = @import("object/Screen.zig");
+const Area = @import("common/Area.zig");
+const Hints = @import("common/Hints.zig");
 
 const WM = @This();
 
 const wl = wayland.client.wl;
+const wp = wayland.client.wp;
 const river = wayland.client.river;
 
 const RegistryResults = struct {
     compositor: ?*wl.Compositor = null,
+    seat: ?*wl.Seat = null,
+    cursor: ?*wp.CursorShapeManagerV1 = null,
     rwm: ?*river.WindowManagerV1 = null,
     rbind: ?*river.XkbBindingsV1 = null,
     shm: ?*wl.Shm = null,
 };
 globals: struct {
     compositor: *wl.Compositor,
+    seat: *wl.Seat,
+    cursor: *wp.CursorShapeManagerV1,
     rwm: *river.WindowManagerV1,
     rbind: *river.XkbBindingsV1,
     display: *wl.Display,
@@ -49,6 +56,8 @@ pub fn init(wm: *WM, gpa: std.mem.Allocator) !void {
     rwm.setListener(*WM, listener, wm);
     const compositor = registy_results.compositor orelse return error.WaylandCompositorNotFound;
     const rbind = registy_results.rbind orelse return error.RiverXkbBindingsNotFound;
+    const cursor = registy_results.cursor orelse return error.WaylandCursorManagerNotFound;
+    const seat = registy_results.seat orelse return error.WaylandSeatNotFound;
 
     wm.* = .{
         .globals = .{
@@ -57,6 +66,8 @@ pub fn init(wm: *WM, gpa: std.mem.Allocator) !void {
             .rbind = rbind,
             .display = display,
             .registry = registry,
+            .cursor = cursor,
+            .seat = seat,
         },
         .gpa = gpa,
     };
@@ -68,6 +79,8 @@ pub fn init(wm: *WM, gpa: std.mem.Allocator) !void {
 pub fn deinit(wm: *WM) void {
     wm.globals.rbind.destroy();
     wm.globals.rwm.destroy();
+    wm.globals.cursor.destroy();
+    wm.globals.seat.destroy();
     wm.globals.compositor.destroy();
     wm.globals.registry.destroy();
     wm.globals.display.disconnect();
@@ -157,12 +170,16 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, res: *Regi
         .global => |global| {
             if (std.mem.orderZ(u8, global.interface, wl.Compositor.interface.name) == .eq) {
                 res.compositor = registry.bind(global.name, wl.Compositor, 6) catch return;
+            } else if (std.mem.orderZ(u8, global.interface, wl.Seat.interface.name) == .eq) {
+                res.seat = registry.bind(global.name, wl.Seat, 9) catch return;
             } else if (std.mem.orderZ(u8, global.interface, wl.Shm.interface.name) == .eq) {
                 res.shm = registry.bind(global.name, wl.Shm, 2) catch return;
             } else if (std.mem.orderZ(u8, global.interface, river.WindowManagerV1.interface.name) == .eq) {
                 res.rwm = registry.bind(global.name, river.WindowManagerV1, 3) catch return;
             } else if (std.mem.orderZ(u8, global.interface, river.XkbBindingsV1.interface.name) == .eq) {
                 res.rbind = registry.bind(global.name, river.XkbBindingsV1, 2) catch return;
+            } else if (std.mem.orderZ(u8, global.interface, wp.CursorShapeManagerV1.interface.name) == .eq) {
+                res.cursor = registry.bind(global.name, wp.CursorShapeManagerV1, 2) catch return;
             }
         },
         .global_remove => {},
@@ -175,9 +192,14 @@ const Seat = struct {
         .next = null,
         .prev = null,
     },
-    raw: u32 = 0,
+    seatId: u32 = undefined,
+    cursor: ?Cursor = null,
     keybinder: *river.XkbBindingsSeatV1,
     keybinds: std.ArrayList(Keybind) = .empty,
+    const Cursor = struct {
+        pointer: *wl.Pointer,
+        shape_device: *wp.CursorShapeDeviceV1,
+    };
 
     const Keybind = struct {
         handle: *river.XkbBindingV1,
@@ -185,6 +207,9 @@ const Seat = struct {
     fn deinit(seat: Seat) void {
         for (seat.keybinds.items) |kb| {
             kb.handle.destroy();
+        }
+        if (seat.pointer) |ptr| {
+            ptr.destroy();
         }
         seat.keybinder.destroy();
         seat.handle.destroy();
@@ -201,7 +226,21 @@ const Seat = struct {
             .op_delta => {},
             .op_release => {},
             .wl_seat => |evt| {
-                seat.raw = evt.name;
+                seat.seatId = evt.name;
+                if (evt.name == wm.globals.seat.getId()) {
+                    const pointer = wm.globals.seat.getPointer() catch {
+                        log.warn("Unable to get pointer for seat {d}", .{evt.name});
+                        return;
+                    };
+                    const device = wm.globals.cursor.getPointer(pointer) catch {
+                        log.warn("Unable to get cursor shape device", .{});
+                        return;
+                    };
+                    seat.cursor = .{
+                        .pointer = pointer,
+                        .shape_device = device,
+                    };
+                }
             },
             .window_interaction => {},
             .removed => {
@@ -372,11 +411,14 @@ test "list remove" {
     try std.testing.expectEqual(null, last.next);
 }
 
-const Window = struct {
+pub const Window = struct {
     handle: *river.WindowV1,
     title: ?[:0]const u8 = null,
     app_id: ?[:0]const u8 = null,
     parent: ?*river.WindowV1 = null,
+    area: Area = .{},
+    hints: Hints = .{},
+    pid: i32 = -1,
     node: *river.NodeV1,
     link: wl.list.Link = .{
         .prev = null,
@@ -390,7 +432,9 @@ const Window = struct {
             return;
         };
         switch (event) {
-            .unreliable_pid => {},
+            .unreliable_pid => |evt| {
+                win.pid = evt.unreliable_pid;
+            },
             .minimize_requested => {},
             .maximize_requested => {},
             .unmaximize_requested => {},
@@ -402,12 +446,22 @@ const Window = struct {
                 wm.gpa.destroy(win);
                 // TODO: handle signaling for closed window
             },
-            .dimensions => {},
-            .dimensions_hint => {},
+            .dimensions => |evt| {
+                win.area.width = @intCast(evt.width);
+                win.area.height = @intCast(evt.height);
+            },
+            .dimensions_hint => |evt| {
+                win.hints.min_width = evt.min_width;
+                win.hints.max_width = evt.max_width;
+                win.hints.min_height = evt.min_height;
+                win.hints.max_height = evt.max_height;
+            },
             .show_window_menu_requested => {},
             .pointer_resize_requested => {},
             .pointer_move_requested => {},
-            .decoration_hint => {},
+            .decoration_hint => |evt| {
+                win.hints.decoration = evt.hint;
+            },
             .parent => |evt| {
                 win.parent = evt.parent;
             },

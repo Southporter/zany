@@ -2,11 +2,14 @@ const std = @import("std");
 const lua = @import("lua");
 const lib = @import("../lua/lib.zig");
 const globals = @import("../globals.zig");
+const wm = @import("../WindowManager.zig");
 const Window = @import("Window.zig");
 const Screen = @import("Screen.zig");
 const Class = @import("Class.zig");
 const Object = @import("Object.zig");
 const Area = @import("../common/Area.zig");
+const Hints = @import("../common/Hints.zig");
+const log = std.log.scoped(.Client);
 
 const Client = @This();
 
@@ -84,17 +87,17 @@ has_NET_WM_WINDOW_TYPE: bool = false,
 // /** True if we ever got an icon from _NET_WM_ICON */
 // bool have_ewmh_icon;
 // /** Size hints */
-// xcb_size_hints_t size_hints;
+hints: Hints = .{},
 // /** The visualtype that c->window uses */
 // xcb_visualtype_t *visualtype;
 // /** Do we honor the client's size hints? */
-// bool size_hints_honor;
+size_hints_honor: bool = true,
 // /** Machine the client is running on. */
 // char *machine;
 // /** Role of the client */
 // char *role;
 // /** Client pid */
-// uint32_t pid;
+pid: i32 = -1,
 // /** Window it is transient for */
 // client_t *transient_for;
 // /** Value of WM_TRANSIENT_FOR */
@@ -343,17 +346,19 @@ pub fn setup(state: *lua.Lua) !void {
 }
 
 fn new(state: *lua.Lua) ?*Object {
+    log.info("Creating new client", .{});
     const client = client_class.create(Client, state) orelse return null;
     return &client.window.obj;
 }
 
 fn wipe(obj: *Object) void {
+    log.info("destroying client", .{});
     globals.gpa.destroy(from(obj));
 }
 
 fn checker(obj: *Object) bool {
     const client = from(obj);
-    return client.window.window == Window.none;
+    return client.window.window != null;
 }
 
 fn toString(state: *lua.Lua, obj: *Object) i32 {
@@ -379,6 +384,101 @@ pub fn from(obj: *Object) *Client {
     const client: *Client = @fieldParentPtr("window", window);
     return client;
 }
+
+pub fn manage(state: *lua.Lua, win: *wm.Window) void {
+    var client = Client.client_class.create(Client, state) orelse unreachable;
+    client.window.window = win;
+    client.isbanned = true;
+    // client.visual_type = draw.findVisual();
+    // client.frame_window =
+
+    // Duplicate client and push it in client list
+    state.pushValue(-1);
+    _ = Object.ref(state, -1);
+    globals.clients.append(globals.gpa, client) catch {
+        std.process.cleanExit();
+    };
+
+    // Set the right screen */
+    // screen_client_moveto(c, screen_getbycoord(win.handle.x, wgeom->y), false);
+
+    // Store initial geometry and emits signals so we inform that geometry have
+    // been set.
+    // c->geometry.x = wgeom->x;
+    // c->geometry.y = wgeom->y;
+    // c->geometry.width = wgeom->width;
+    // c->geometry.height = wgeom->height;
+    client.geometry = win.area;
+
+    Object.emitSignal(state, -1, "property::x", 0);
+    Object.emitSignal(state, -1, "property::y", 0);
+    Object.emitSignal(state, -1, "property::width", 0);
+    Object.emitSignal(state, -1, "property::height", 0);
+    Object.emitSignal(state, -1, "property::window", 0);
+    Object.emitSignal(state, -1, "property::geometry", 0);
+
+    // /* Set border width */
+    // window_set_border_width(L, -1, wgeom->border_width);
+    //
+    // /* we honor size hints by default */
+    client.size_hints_honor = true;
+    Object.emitSignal(state, -1, "property::size_hints_honor", 0);
+    //
+    // /* update all properties */
+    // client_update_properties(L, -1, c);
+    //
+    // /* check if this is a TRANSIENT_FOR of another client */
+    // foreach(oc, globalconf.clients)
+    //     if ((*oc)->transient_for_window == w)
+    //         client_find_transient_for(*oc);
+    //
+    // /* Put the window in normal state. */
+    // xwindow_set_state(c->window, XCB_ICCCM_WM_STATE_NORMAL);
+    //
+    // /* Then check clients hints */
+    // ewmh_client_check_hints(c);
+    //
+    // /* Push client in stack */
+    // stack_client_push(c);
+    //
+    // /* Request our response */
+    // xcb_get_property_reply_t *reply =
+    //     xcb_get_property_reply(globalconf.connection, startup_id_q, NULL);
+    // /* Say spawn that a client has been started, with startup id as argument */
+    // char *startup_id = xutil_get_text_property_from_reply(reply);
+    // p_delete(&reply);
+    //
+    // if (startup_id == NULL && c->leader_window != XCB_NONE) {
+    //     /* GTK hides this property elsewhere. No idea why. */
+    //     startup_id_q = xcb_get_property(globalconf.connection, false,
+    //                                     c->leader_window, _NET_STARTUP_ID,
+    //                                     XCB_GET_PROPERTY_TYPE_ANY, 0, UINT_MAX);
+    //     reply = xcb_get_property_reply(globalconf.connection, startup_id_q, NULL);
+    //     startup_id = xutil_get_text_property_from_reply(reply);
+    //     p_delete(&reply);
+    // }
+    // c->startup_id = startup_id;
+    //
+    // spawn_start_notify(c, startup_id);
+    //
+    client_class.signals.emit(state, "list", 0);
+
+    // client is still on top of the stack; emit signal */
+    Object.emitSignal(state, -1, "manage", 0);
+    //
+    // xcb_generic_error_t *error = xcb_request_check(globalconf.connection, reparent_cookie);
+    // if (error != NULL) {
+    //     warn("Failed to manage window with name '%s', class '%s', instance '%s', because reparenting failed.",
+    //             NONULL(c->name), NONULL(c->class), NONULL(c->instance));
+    //     event_handle((xcb_generic_event_t *) error);
+    //     p_delete(&error);
+    //     client_unmanage(c, true);
+    // }
+    //
+    // pop client
+    state.pop(1);
+}
+
 // Get all clients into a table.
 //
 // @tparam[opt] integer|screen screen A screen number to filter clients on.

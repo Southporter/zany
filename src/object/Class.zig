@@ -39,6 +39,7 @@ pub const Property = struct {
     newindex: ?PropFn = null,
 };
 
+// prefix##_new
 pub fn create(class: *Class, comptime T: type, state: *lua.Lua) ?*T {
     const item = state.newUserdata(T);
     item.* = .{};

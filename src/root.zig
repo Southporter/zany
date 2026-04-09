@@ -5,6 +5,7 @@ const WindowManager = @import("WindowManager.zig");
 const zany_lua = @import("./lua.zig");
 const zany_lib = @import("./lua/lib.zig");
 const globals = @import("globals.zig");
+const defaults = @import("defaults.zig");
 const util = @import("./util.zig");
 const Screen = @import("object/Screen.zig");
 const Button = @import("object/Button.zig");
@@ -13,9 +14,12 @@ const Window = @import("object/Window.zig");
 const Client = @import("object/Client.zig");
 const Object = @import("object/Object.zig");
 const base = @import("lua/base.zig");
+const mouse = @import("lua/mouse.zig");
 const Drawable = @import("drawable.zig");
 const Drawin = @import("object/Drawin.zig");
 const Key = @import("object/Key.zig");
+const keygrabber = @import("lua/keygrabber.zig");
+const mousegrabber = @import("lua/mousegrabber.zig");
 
 const log = std.log.scoped(.zany);
 
@@ -75,7 +79,7 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
         .{ .name = "set_xproperty", .func = lua.wrap(set_xproperty) },
         .{ .name = "get_xproperty", .func = lua.wrap(get_xproperty) },
         .{ .name = "__index", .func = lua.wrap(index) },
-        .{ .name = "__newindex", .func = lua.wrap(default_newindex) },
+        .{ .name = "__newindex", .func = lua.wrap(defaults.newindex) },
         .{ .name = "xkb_set_layout_group", .func = lua.wrap(xkb_set_layout_group) },
         .{ .name = "xkb_get_layout_group", .func = lua.wrap(xkb_get_layout_group) },
         .{ .name = "xkb_get_group_names", .func = lua.wrap(xkb_get_group_names) },
@@ -85,9 +89,22 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
     };
     vm.pushLightUserdata(self);
     vm.setGlobal("__zany");
-    try zany_lua.openLib(vm, "awesome", awesome_lib, awesome_lib);
-    try zany_lua.openLib(vm, "root", &base.methods, &base.meta);
     Object.setup(vm);
+
+    {
+        vm.pushFunction(lua.wrap(print));
+        vm.setGlobal("print");
+    }
+
+    try zany_lua.openLib(vm, "awesome", awesome_lib, awesome_lib);
+    try zany_lua.setupSignals(vm, "awesome");
+    zany_lua.registerLib(vm, "root", &base.lib);
+    vm.pop(1);
+    zany_lua.registerLib(vm, "keygrabber", &keygrabber.lib);
+    vm.pop(1);
+    zany_lua.registerLib(vm, "mousegrabber", &mousegrabber.lib);
+    vm.pop(1);
+    try zany_lua.openLib(vm, "mouse", &mouse.methods, &mouse.meta);
 
     try Screen.setup(vm);
     try Button.setup(vm);
@@ -150,9 +167,10 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
             \\
         , .{});
 
-    try self.client_scan();
-
     try zany_lua.loadRc(vm, config.config);
+
+    self.client_scan();
+    self.emit_startup();
 
     self.state = .running;
 }
@@ -170,10 +188,36 @@ pub fn deinit(zany: *Zany) void {
     zany.vm.deinit();
 }
 
+fn print(state: *lua.Lua) i32 {
+    const print_log = std.log.scoped(.print);
+    var content = std.Io.Writer.Allocating.initCapacity(globals.gpa, 256) catch |err| {
+        print_log.err("Out of memory: {t}", .{err});
+        return 0;
+    };
+    defer content.deinit();
+    const top: usize = @intCast(state.getTop());
+    for (0..top + 1) |i| {
+        const offset: i32 = @intCast(i + 1);
+        if (state.isNoneOrNil(offset)) {
+            continue;
+        }
+        if (state.isBoolean(offset)) {
+            content.writer.print("{any}", .{state.toBoolean(offset)}) catch {};
+        }
+
+        const s = state.toString(offset) catch "unknown";
+        content.writer.writeAll(s) catch {};
+    }
+    content.writer.flush() catch {};
+    print_log.info("{s}", .{content.written()});
+    return 0;
+}
+
 pub fn run(zany: *Zany) !void {
     zany.state = .running;
     log.info("Starting run loop", .{});
     while (zany.state != .running) {
+        log.info("Run loop", .{});
         zany.wm.poll() catch |err| {
             log.err("Window Manager encountered an error: {t}", .{err});
             zany.state = .stopped;
@@ -555,17 +599,9 @@ fn index(state: *Lua) i32 {
     //     return 1;
     // }
     //
-    return default_index(state);
+    return defaults.index(state);
 }
 
-fn default_index(state: *lua.Lua) i32 {
-    globals.signals.emit(state, "debug::index::miss", 2);
-    return 0;
-}
-fn default_newindex(state: *Lua) i32 {
-    globals.signals.emit(state, "debug::newindex::miss", 3);
-    return 0;
-}
 fn xkb_set_layout_group(state: *Lua) i32 {
     _ = state;
     std.debug.panic("awesome.xkb_set_layout_group not implemented", .{});
@@ -610,13 +646,20 @@ fn screen_scan(zany: *Zany) !void {
     }
 }
 
-fn client_scan(zany: *Zany) !void {
+fn client_scan(zany: *Zany) void {
     Client.client_class.signals.emit(zany.vm, "scanning", 0);
     defer Client.client_class.signals.emit(zany.vm, "scanned", 0);
     var iter = zany.wm.windows.iterator(.forward);
     while (iter.next()) |win| {
         log.debug("Scanning Win: {*}", .{win});
+        Client.manage(zany.vm, win);
     }
+}
+fn emit_startup(zany: *Zany) void {
+    globals.signals.emit(zany.vm, "startup", 0);
+}
+fn emit_refresh(zany: *Zany) void {
+    globals.signals.emit(zany.vm, "refresh", 0);
 }
 
 fn onError(state: *lua.Lua) i32 {

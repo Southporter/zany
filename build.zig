@@ -15,6 +15,7 @@ pub fn build(b: *std.Build) void {
     const river = b.dependency("river", .{});
 
     const scanner = Scanner.create(b, .{});
+    scanner.addSystemProtocol("stable/tablet/tablet-v2.xml");
     scanner.addSystemProtocol("staging/cursor-shape/cursor-shape-v1.xml");
     scanner.addCustomProtocol(river.path(
         "protocol/river-window-management-v1.xml",
@@ -27,6 +28,7 @@ pub fn build(b: *std.Build) void {
     ));
 
     scanner.generate("wl_compositor", 6);
+    scanner.generate("wl_seat", 9);
     scanner.generate("wl_shm", 2);
     scanner.generate("wl_output", 4);
     scanner.generate("wp_cursor_shape_manager_v1", 2);

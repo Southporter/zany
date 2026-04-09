@@ -25,5 +25,6 @@ Lua Dependencies:
 | libcairo | `cairo` | `libcairo2` |
 | Cairo gobject | `cairo-gobject` | `libcairo-gobject2` |
 | libango | `pango` | `libpango-1.0-0` |
+| gdk pixbuf | `gdk-pixbuf2` | |
 
 

@@ -7,6 +7,7 @@ const Object = @import("Object.zig");
 const Button = @import("Button.zig");
 const Color = @import("../Color.zig");
 const globals = @import("../globals.zig");
+const wm = @import("../WindowManager.zig");
 
 const Window = @This();
 
@@ -14,7 +15,7 @@ pub const none = std.math.maxInt(u32);
 
 obj: Object = .{},
 //  The River window number
-window: u32 = none,
+window: ?*wm.Window = null,
 //  The frame window, might be XCB_NONE
 // xcb_window_t frame_window;
 opacity: f32 = 1.0,
@@ -215,7 +216,8 @@ pub fn set_type(state: *lua.Lua, obj: *Object) i32 {
     }
     if (win.kind != kind) {
         win.kind = kind;
-        if (win.window != none) {
+        if (win.window) |w| {
+            _ = w;
             //         ewmh_update_window_type(w->window, window_translate_type(w->type));
         }
         Object.emitSignal(state, -3, "property::type", 0);

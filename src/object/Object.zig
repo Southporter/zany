@@ -152,6 +152,7 @@ fn connectSignalFromStack(state: *lua.Lua, oud: i32, name: [:0]const u8, ud: i32
         log.warn("Signal function from stack is not a userdata", .{});
         return;
     };
+    log.debug("Connecting Object signal: {s}", .{name});
     const reference = refItem(state, oud, ud) orelse return;
     obj.signals.connect(name, reference);
 }

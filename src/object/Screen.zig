@@ -77,8 +77,8 @@ pub var screen_class: Class = .{
 pub fn setup(state: *lua.Lua) !void {
     const methods = [_]lua.FnReg{
         .{ .name = "count", .func = lua.wrap(count) },
-        .{ .name = "_viewports", .func = lua.wrap(viewports) },
-        .{ .name = "_scan_quiet", .func = lua.wrap(quietScan) },
+        // .{ .name = "_viewports", .func = lua.wrap(viewports) },
+        // .{ .name = "_scan_quiet", .func = lua.wrap(quietScan) },
         .{ .name = "__index", .func = lua.wrap(moduleIndex) },
         .{ .name = "__newindex", .func = lua.wrap(moduleNewindex) },
         .{ .name = "__call", .func = lua.wrap(call) },
@@ -104,10 +104,19 @@ fn wipe(obj: *Object) void {
     }
     globals.gpa.destroy(screen);
 }
+/// Get a screen's index.
+/// screen_get_index
+fn index(screen: *Screen) usize {
+    for (globals.screens.items, 0..) |s, res| {
+        if (screen == s) {
+            return res;
+        }
+    }
+    return 0;
+}
 
 pub fn count(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("screen.count not implemented", .{});
+    state.pushInteger(@intCast(globals.screens.items.len));
     return 0;
 }
 pub fn viewports(state: *lua.Lua) i32 {
@@ -120,20 +129,67 @@ pub fn quietScan(state: *lua.Lua) i32 {
     std.debug.panic("screen._scan_quiet not implemented", .{});
     return 0;
 }
+// Screen module.
+// \param L The Lua VM state.
+// \return The number of elements pushed on stack.
+// \luastack
+// \lfield number The screen number, to get a screen.
+//
 pub fn moduleIndex(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("screen[index] not implemented", .{});
-    return 0;
+    const kind = state.typeOf(2);
+    if (kind == .string) {
+        const name = state.toString(2) catch unreachable;
+        if (std.mem.eql(u8, name, "primary")) {
+            return Object.push(state, @ptrCast(getPrimary(state)));
+        }
+        for (globals.screens.items) |screen| {
+            if (screen.name) |screen_name| {
+                if (std.mem.eql(u8, name, screen_name)) {
+                    return Object.push(state, screen);
+                }
+            }
+        }
+
+        zanylua.warn(state, "Unknown screen output name: {s}", .{name});
+        state.pushNil();
+        return 1;
+    }
+
+    return Object.push(state, @ptrCast(checkscreen(state, 2)));
 }
 pub fn moduleNewindex(state: *lua.Lua) i32 {
     _ = state;
     std.debug.panic("screen[newindex] not implemented", .{});
     return 0;
 }
+
+// Iterate over screens.
+// @usage
+// for s in screen do
+//     print("Oh, wow, we have screen " .. tostring(s))
+// end
+// @function screen
+//
 pub fn call(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("screen(call) not implemented", .{});
-    return 0;
+    @breakpoint();
+    // TODO: Is there a way to do this without the index juggling?
+    var idx: usize = std.math.maxInt(usize);
+    if (state.isNoneOrNil(3)) {
+        idx = 0;
+    } else {
+        const screen = checkscreen(state, 3);
+        if (screen) |s| {
+            idx = s.index();
+        }
+    }
+
+    std.log.debug("Idx for screens: {d}", .{idx});
+    if (idx < globals.screens.items.len) {
+        _ = Object.push(state, globals.screens.items[@intCast(idx)]);
+    } else {
+        state.pushNil();
+    }
+    return 1;
 }
 pub fn fakeAdd(state: *lua.Lua) i32 {
     _ = state;
@@ -162,11 +218,11 @@ pub fn getGeometry(state: *lua.Lua, obj: *Object) i32 {
     std.debug.panic("screen.geometry not implemented", .{});
     return 0;
 }
+// luaA_screen_get_index
 pub fn getIndex(state: *lua.Lua, obj: *Object) i32 {
-    _ = state;
-    _ = obj;
-    std.debug.panic("screen.index not implemented", .{});
-    return 0;
+    const screen: *Screen = @fieldParentPtr("obj", obj);
+    state.pushInteger(@intCast(screen.index()));
+    return 1;
 }
 pub fn getOutputs(state: *lua.Lua, obj: *Object) i32 {
     _ = state;
@@ -216,11 +272,20 @@ pub fn checkscreen(state: *lua.Lua, sidx: i32) ?*Screen {
 }
 
 pub fn add(state: *lua.Lua) !?*Screen {
-    const obj = new(state) orelse return null;
-    const screen: *Screen = @fieldParentPtr("obj", obj);
+    const screen = screen_class.create(Screen, state) orelse return null;
     _ = Object.ref(state, -1);
     try globals.screens.append(globals.gpa, screen);
     screen.xid = .none;
     screen.lifecycle = .user;
     return screen;
+}
+
+fn getPrimary(state: *lua.Lua) ?*Screen {
+    if (globals.primary_screen == null and globals.screens.items.len > 0) {
+        globals.primary_screen = globals.screens.items[0];
+        _ = Object.push(state, globals.primary_screen.?);
+        Object.emitSignal(state, -1, "primary_changed", 0);
+        state.pop(1);
+    }
+    return globals.primary_screen;
 }
