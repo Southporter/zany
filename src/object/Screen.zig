@@ -9,6 +9,7 @@ const globals = @import("../globals.zig");
 const wm = @import("../WindowManager.zig");
 const Viewport = wm.Viewport;
 const Area = @import("../common/Area.zig");
+const log = std.log.scoped(.screen);
 
 const Screen = @This();
 
@@ -107,7 +108,8 @@ fn wipe(obj: *Object) void {
 /// Get a screen's index.
 /// screen_get_index
 fn index(screen: *Screen) usize {
-    for (globals.screens.items, 0..) |s, res| {
+    // Lua is 1 indexed, so start from 1
+    for (globals.screens.items, 1..) |s, res| {
         if (screen == s) {
             return res;
         }
@@ -171,7 +173,6 @@ pub fn moduleNewindex(state: *lua.Lua) i32 {
 // @function screen
 //
 pub fn call(state: *lua.Lua) i32 {
-    @breakpoint();
     // TODO: Is there a way to do this without the index juggling?
     var idx: usize = std.math.maxInt(usize);
     if (state.isNoneOrNil(3)) {
@@ -179,7 +180,7 @@ pub fn call(state: *lua.Lua) i32 {
     } else {
         const screen = checkscreen(state, 3);
         if (screen) |s| {
-            idx = s.index();
+            idx = @intCast(s.index());
         }
     }
 
