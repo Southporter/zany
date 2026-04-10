@@ -48,17 +48,36 @@ pub fn build(b: *std.Build) void {
         .shared = true,
     });
 
+    const pixbuf = b.addTranslateC(.{
+        .root_source_file = b.path("pkg/pixbuf.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    pixbuf.addSystemIncludePath(.{ .cwd_relative = "/usr/include/gdk-pixbuf-2.0/" });
+    pixbuf.addSystemIncludePath(.{ .cwd_relative = "/usr/include/glib-2.0/" });
+    pixbuf.addSystemIncludePath(.{ .cwd_relative = "/usr/lib64/glib-2.0/include/" });
+    const cairo = b.addTranslateC(.{
+        .root_source_file = b.path("pkg/cairo-zany.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cairo.addSystemIncludePath(.{ .cwd_relative = "/usr/include/cairo/" });
+
     const mod = b.addModule("zanywm", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .imports = &.{
             .{ .name = "lua", .module = ziglua.module("zlua") },
             .{ .name = "wayland", .module = wayland },
+            .{ .name = "pixbuf", .module = pixbuf.createModule() },
+            .{ .name = "cairo", .module = cairo.createModule() },
         },
         .link_libc = true,
     });
     mod.addOptions("options", options);
     mod.linkSystemLibrary("wayland-client", .{});
+    mod.linkSystemLibrary("cairo", .{});
+    mod.linkSystemLibrary("gdk-pixbuf-2.0", .{});
 
     const exe = b.addExecutable(.{
         .name = "zany",

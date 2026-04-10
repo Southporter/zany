@@ -152,7 +152,6 @@ fn connectSignalFromStack(state: *lua.Lua, oud: i32, name: [:0]const u8, ud: i32
         log.warn("Signal function from stack is not a userdata", .{});
         return;
     };
-    log.debug("Connecting Object signal: {s}", .{name});
     const reference = refItem(state, oud, ud) orelse return;
     obj.signals.connect(name, reference);
 }
@@ -298,7 +297,7 @@ pub fn push(state: *lua.Lua, pointer: *anyopaque) i32 {
 // \param ud The object index on the stack.
 // \param pointer The item pointer.
 // \return The number of element pushed on stack.
-pub fn pushItem(state: *lua.Lua, ud: i32, pointer: *anyopaque) i32 {
+pub fn pushItem(state: *lua.Lua, ud: i32, pointer: ?*anyopaque) i32 {
     // Get env table of the object
     zanylua.getuservalue(state, ud);
     // Push key
@@ -352,7 +351,7 @@ pub fn unref(state: *lua.Lua, pointer: *const anyopaque) void {
 // \param ud The index of the object on the stack.
 // \param iud The index of the item on the stack.
 // \return The item reference.
-fn refItem(state: *lua.Lua, ud: i32, iud: i32) ?*anyopaque {
+pub fn refItem(state: *lua.Lua, ud: i32, iud: i32) ?*anyopaque {
     // Get the env table from the object
     zanylua.getuservalue(state, ud);
     const pointer = incref(state, -1, if (iud < 0) iud - 1 else iud);

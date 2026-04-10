@@ -1,12 +1,14 @@
 const std = @import("std");
 const options = @import("options");
 const lua = @import("lua");
+const pixbuf = @import("pixbuf");
 const WindowManager = @import("WindowManager.zig");
 const zany_lua = @import("./lua.zig");
 const zany_lib = @import("./lua/lib.zig");
 const globals = @import("globals.zig");
 const defaults = @import("defaults.zig");
 const util = @import("./util.zig");
+const draw = @import("draw.zig");
 const Screen = @import("object/Screen.zig");
 const Button = @import("object/Button.zig");
 const Tag = @import("object/Tag.zig");
@@ -15,7 +17,7 @@ const Client = @import("object/Client.zig");
 const Object = @import("object/Object.zig");
 const base = @import("lua/base.zig");
 const mouse = @import("lua/mouse.zig");
-const Drawable = @import("drawable.zig");
+const Drawable = @import("object/Drawable.zig");
 const Drawin = @import("object/Drawin.zig");
 const Key = @import("object/Key.zig");
 const keygrabber = @import("lua/keygrabber.zig");
@@ -367,9 +369,14 @@ fn load_image(state: *Lua) i32 {
     return 0;
 }
 fn pixbuf_to_surface(state: *Lua) i32 {
-    _ = state;
-    std.debug.panic("awesome.pixbuf_to_surface not implemented", .{});
-    return 0;
+    const buf = state.toUserdata(pixbuf.GdkPixbuf, 1) catch {
+        log.warn("Unable to turn param into GdkPixbuf, not userdata", .{});
+        state.pushNil();
+        return 1;
+    };
+    const surface = draw.surfaceFromPixbuf(buf);
+    state.pushLightUserdata(surface);
+    return 1;
 }
 fn set_preferred_icon_size(state: *Lua) i32 {
     _ = state;

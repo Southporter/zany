@@ -39,7 +39,7 @@ pub const Property = struct {
     newindex: ?PropFn = null,
 };
 
-// prefix##_new
+/// prefix##_new
 pub fn create(class: *Class, comptime T: type, state: *lua.Lua) ?*T {
     const item = state.newUserdata(T);
     item.* = .{};
@@ -527,11 +527,11 @@ pub fn newIndex(state: *lua.Lua) i32 {
     return 0;
 }
 
-// Generic constructor function for objects.
-// \param L The Lua VM state.
-// \return The number of elements pushed on stack.
-//
-// luaA_class_new
+/// Generic constructor function for objects.
+/// \param L The Lua VM state.
+/// \return The number of elements pushed on stack.
+///
+/// luaA_class_new
 pub fn new(class: *Class, state: *lua.Lua) i32 {
     // Check we have a table that should contains some properties
     lib.checkTable(state, 2);
