@@ -97,6 +97,9 @@ pub fn toModifiers(state: *lua.Lua, ud: i32) Modifiers {
             mods.shift = true;
         } else if (std.mem.eql(u8, key, "Ctrl")) {
             mods.ctrl = true;
+        } else if (std.mem.eql(u8, key, "Lock")) {
+            // Not sure what to do with Lock
+            log.info("Lock not handled", .{});
         } else {
             log.warn("Key in `toModifiers` not handled: {s}", .{key});
         }

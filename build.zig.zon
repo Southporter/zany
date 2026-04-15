@@ -20,6 +20,10 @@
             .url = "git+https://codeberg.org/river/river#24ace530c102c0e4c9cfc835f77a86cb080ec2ba",
             .hash = "river-0.4.0-dev-_G6NjhpUCwCqEZssUDqs-kGSLCvKRlb_7_eI7S-LKckH",
         },
+        .xkbcommon = .{
+            .url = "https://codeberg.org/ifreund/zig-xkbcommon/archive/v0.4.0.tar.gz",
+            .hash = "xkbcommon-0.4.0-VDqIe0i2AgDRsok2GpMFYJ8SVhQS10_PI2M_CnHXsJJZ",
+        },
     },
     .paths = .{
         "build.zig",

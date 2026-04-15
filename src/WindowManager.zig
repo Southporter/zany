@@ -6,6 +6,7 @@ const Lua = lua.Lua;
 const Screen = @import("object/Screen.zig");
 const Area = @import("common/Area.zig");
 const Hints = @import("common/Hints.zig");
+const Buffer = @import("wayland/Buffer.zig");
 
 const WM = @This();
 
@@ -15,18 +16,31 @@ const river = wayland.client.river;
 
 const RegistryResults = struct {
     compositor: ?*wl.Compositor = null,
+    shm: ?*wl.Shm = null,
     seat: ?*wl.Seat = null,
     cursor: ?*wp.CursorShapeManagerV1 = null,
     rwm: ?*river.WindowManagerV1 = null,
     rbind: ?*river.XkbBindingsV1 = null,
-    shm: ?*wl.Shm = null,
+    xkb_config: ?*river.XkbConfigV1 = null,
+
+    fn destroy(self: RegistryResults) void {
+        if (self.compositor) |compositor| compositor.destroy();
+        if (self.shm) |shm| shm.destroy();
+        if (self.seat) |seat| seat.destroy();
+        if (self.cursor) |cursor| cursor.destroy();
+        if (self.rwm) |rwm| rwm.destroy();
+        if (self.rbind) |rbind| rbind.destroy();
+        if (self.xkb_config) |xkb_config| xkb_config.destroy();
+    }
 };
 globals: struct {
     compositor: *wl.Compositor,
+    shm: *wl.Shm,
     seat: *wl.Seat,
     cursor: *wp.CursorShapeManagerV1,
     rwm: *river.WindowManagerV1,
     rbind: *river.XkbBindingsV1,
+    xkb_config: *river.XkbConfigV1,
     display: *wl.Display,
     registry: *wl.Registry,
 },
@@ -40,12 +54,26 @@ state: enum {
 seats: wl.list.Head(Seat, .link) = undefined,
 outputs: wl.list.Head(Viewport, .link) = undefined,
 windows: wl.list.Head(Window, .link) = undefined,
+root_shell: struct {
+    width: u32 = 0,
+    height: u32 = 0,
+    surface: *wl.Surface,
+    shell_surface: *river.ShellSurfaceV1,
+    buffer: Buffer,
+    node: *river.NodeV1,
+},
+keyboard: Keyboard = .{
+    .handle = undefined,
+},
 gpa: std.mem.Allocator,
 
 pub fn init(wm: *WM, gpa: std.mem.Allocator) !void {
     var registy_results: RegistryResults = .{};
+    errdefer registy_results.destroy();
     const display = try wl.Display.connect(null);
+    errdefer display.disconnect();
     const registry = try display.getRegistry();
+    errdefer registry.destroy();
     registry.setListener(*RegistryResults, registryListener, &registy_results);
 
     if (display.roundtrip() != .SUCCESS) {
@@ -53,34 +81,67 @@ pub fn init(wm: *WM, gpa: std.mem.Allocator) !void {
     }
 
     const rwm = registy_results.rwm orelse return error.RiverWindowManagerNotFound;
+    errdefer rwm.destroy();
     rwm.setListener(*WM, listener, wm);
+    const xkb_config = registy_results.xkb_config orelse return error.RiverXkbConfigNotFound;
+    errdefer xkb_config.destroy();
     const compositor = registy_results.compositor orelse return error.WaylandCompositorNotFound;
+    errdefer compositor.destroy();
+    const shm = registy_results.shm orelse return error.WaylandShmNotFound;
+    errdefer shm.destroy();
     const rbind = registy_results.rbind orelse return error.RiverXkbBindingsNotFound;
     const cursor = registy_results.cursor orelse return error.WaylandCursorManagerNotFound;
     const seat = registy_results.seat orelse return error.WaylandSeatNotFound;
 
+    const root_surface = try compositor.createSurface();
+    errdefer root_surface.destroy();
+    const root_shell_surface = try rwm.getShellSurface(root_surface);
+    errdefer root_shell_surface.destroy();
+    const root_shell_node = try root_shell_surface.getNode();
+    errdefer root_shell_node.destroy();
     wm.* = .{
         .globals = .{
             .compositor = compositor,
+            .shm = shm,
             .rwm = rwm,
             .rbind = rbind,
             .display = display,
             .registry = registry,
             .cursor = cursor,
             .seat = seat,
+            .xkb_config = xkb_config,
+        },
+        .root_shell = .{
+            .surface = root_surface,
+            .buffer = try .create(0, wm),
+            .shell_surface = root_shell_surface,
+            .node = root_shell_node,
         },
         .gpa = gpa,
     };
+    xkb_config.setListener(*WM, xkbConfigListener, wm);
     wm.seats.init();
     wm.outputs.init();
     wm.windows.init();
 }
 
 pub fn deinit(wm: *WM) void {
+    wm.keyboard.deinit(wm.gpa);
+    {
+        var iter = wm.seats.safeIterator(.reverse);
+        while (iter.next()) |seat| {
+            seat.deinit();
+        }
+    }
+    wm.root_shell.node.destroy();
+    wm.root_shell.shell_surface.destroy();
+    wm.root_shell.buffer.destroy();
+    wm.root_shell.surface.destroy();
     wm.globals.rbind.destroy();
     wm.globals.rwm.destroy();
     wm.globals.cursor.destroy();
     wm.globals.seat.destroy();
+    wm.globals.shm.destroy();
     wm.globals.compositor.destroy();
     wm.globals.registry.destroy();
     wm.globals.display.disconnect();
@@ -165,6 +226,19 @@ fn listener(
     }
 }
 
+fn xkbConfigListener(config: *river.XkbConfigV1, event: river.XkbConfigV1.Event, wm: *WM) void {
+    log.debug("Xkb Config listener: {t}", .{event});
+    switch (event) {
+        .finished => {
+            config.destroy();
+        },
+        .xkb_keyboard => |evt| {
+            wm.keyboard.handle = evt.id;
+            evt.id.setListener(*WM, Keyboard.listener, wm);
+        },
+    }
+}
+
 fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, res: *RegistryResults) void {
     switch (event) {
         .global => |global| {
@@ -180,6 +254,8 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, res: *Regi
                 res.rbind = registry.bind(global.name, river.XkbBindingsV1, 2) catch return;
             } else if (std.mem.orderZ(u8, global.interface, wp.CursorShapeManagerV1.interface.name) == .eq) {
                 res.cursor = registry.bind(global.name, wp.CursorShapeManagerV1, 2) catch return;
+            } else if (std.mem.orderZ(u8, global.interface, river.XkbConfigV1.interface.name) == .eq) {
+                res.xkb_config = registry.bind(global.name, river.XkbConfigV1, 1) catch return;
             }
         },
         .global_remove => {},
@@ -207,9 +283,6 @@ const Seat = struct {
     fn deinit(seat: Seat) void {
         for (seat.keybinds.items) |kb| {
             kb.handle.destroy();
-        }
-        if (seat.pointer) |ptr| {
-            ptr.destroy();
         }
         seat.keybinder.destroy();
         seat.handle.destroy();
@@ -297,8 +370,8 @@ fn findSeat(wm: *WM, handle: *river.SeatV1) ?*Seat {
 pub const Viewport = struct {
     handle: *river.OutputV1,
     raw: u32 = 0,
-    x: i32 = 0,
-    y: i32 = 0,
+    x: i32 = -1,
+    y: i32 = -1,
     height: isize = 0,
     width: isize = 0,
     screen: *Screen = undefined,
@@ -317,10 +390,24 @@ pub const Viewport = struct {
             .position => |evt| {
                 o.x = evt.x;
                 o.y = evt.y;
+                if (!(o.height == 0 and o.width == 0)) {
+                    const max_width: u32 = @intCast(o.width + o.x);
+                    const max_height: u32 = @intCast(o.height + o.y);
+                    wm.root_shell.height = @max(max_height, wm.root_shell.height);
+                    wm.root_shell.width = @max(max_width, wm.root_shell.width);
+                    wm.root_shell.buffer.resize(wm.globals.shm, @intCast(max_width), @intCast(max_height)) catch unreachable;
+                }
             },
             .dimensions => |evt| {
                 o.height = evt.height;
                 o.width = evt.width;
+                if (!(o.x == -1 and o.y == -1)) {
+                    const max_width: u32 = @intCast(o.width + o.x);
+                    const max_height: u32 = @intCast(o.height + o.y);
+                    wm.root_shell.height = @max(max_height, wm.root_shell.height);
+                    wm.root_shell.width = @max(max_width, wm.root_shell.width);
+                    wm.root_shell.buffer.resize(wm.globals.shm, @intCast(max_width), @intCast(max_height)) catch unreachable;
+                }
             },
             .wl_output => |evt| {
                 o.raw = evt.name;
@@ -492,3 +579,60 @@ fn findWindow(wm: *WM, window: *river.WindowV1) ?*Window {
     }
     return null;
 }
+
+const Keyboard = struct {
+    handle: *river.XkbKeyboardV1,
+    name: [:0]const u8 = "",
+    idx: u32 = 0,
+    input: ?*river.InputDeviceV1 = null,
+    flags: struct {
+        num_lock: Flag,
+        caps_lock: Flag,
+    } = .{
+        .num_lock = .disabled,
+        .caps_lock = .disabled,
+    },
+    const Flag = enum {
+        enabled,
+        disabled,
+    };
+
+    fn deinit(kb: *Keyboard, gpa: std.mem.Allocator) void {
+        gpa.free(kb.name);
+    }
+
+    fn listener(handle: *river.XkbKeyboardV1, event: river.XkbKeyboardV1.Event, wm: *WM) void {
+        const kb = &wm.keyboard;
+        log.debug("Xkb Keyboard listener: {t}", .{event});
+        switch (event) {
+            .layout => |evt| {
+                if (evt.name) |name| {
+                    const new_name = std.mem.span(name);
+                    wm.keyboard.name = wm.gpa.dupeZ(u8, new_name) catch return;
+                    log.debug("New layout name: {s}", .{wm.keyboard.name});
+                } else {
+                    kb.name = "";
+                }
+                kb.idx = evt.index;
+            },
+            .removed => {
+                handle.destroy();
+            },
+            .numlock_disabled => {
+                kb.flags.num_lock = .disabled;
+            },
+            .numlock_enabled => {
+                kb.flags.num_lock = .enabled;
+            },
+            .capslock_disabled => {
+                kb.flags.caps_lock = .disabled;
+            },
+            .capslock_enabled => {
+                kb.flags.caps_lock = .enabled;
+            },
+            .input_device => |evt| {
+                kb.input = evt.device;
+            },
+        }
+    }
+};

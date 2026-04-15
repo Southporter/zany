@@ -34,6 +34,7 @@ pub fn main() !void {
     defer zany.deinit();
 
     {
+        // TODO: Chandle sigchild better
         var sa: std.posix.Sigaction = .{
             .handler = .{
                 .handler = fatal,

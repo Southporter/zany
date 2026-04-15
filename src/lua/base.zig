@@ -1,27 +1,30 @@
 const std = @import("std");
 const lua = @import("lua");
+const cairo = @import("cairo");
 const zanylib = @import("lib.zig");
 const luaZ = @import("../lua.zig");
 const cursorlib = @import("./cursor.zig");
 const CursorShape = @import("wayland").client.wp.CursorShapeDeviceV1.Shape;
+const Area = @import("../common/Area.zig");
+const globals = @import("../globals.zig");
+const Object = @import("../object/Object.zig");
 const log = std.log.scoped(.root);
 
 pub const lib = [_]lua.FnReg{
-    .{ .name = "_buttons", .func = lua.wrap(buttons) },
-    .{ .name = "_keys", .func = lua.wrap(keys) },
+    .{ .name = "buttons", .func = lua.wrap(buttons) },
+    .{ .name = "keys", .func = lua.wrap(keys) },
     .{ .name = "cursor", .func = lua.wrap(cursor) },
     .{ .name = "fake_input", .func = lua.wrap(fake_input) },
     .{ .name = "drawins", .func = lua.wrap(drawins) },
-    .{ .name = "_wallpaper", .func = lua.wrap(wallpaper) },
-    .{ .name = "content", .func = lua.wrap(get_content) },
+    .{ .name = "wallpaper", .func = lua.wrap(wallpaper) },
     .{ .name = "size", .func = lua.wrap(size) },
     .{ .name = "size_mm", .func = lua.wrap(size_mm) },
     .{ .name = "tags", .func = lua.wrap(tags) },
     .{ .name = "__index", .func = lua.wrap(index) },
     .{ .name = "__newindex", .func = lua.wrap(newindex) },
-    .{ .name = "set_index_miss_handler", .func = lua.wrap(set_index_miss_handler) },
-    .{ .name = "set_call_handler", .func = lua.wrap(set_call_handler) },
-    .{ .name = "set_newindex_miss_handler", .func = lua.wrap(set_newindex_miss_handler) },
+    // .{ .name = "set_index_miss_handler", .func = lua.wrap(set_index_miss_handler) },
+    // .{ .name = "set_call_handler", .func = lua.wrap(set_call_handler) },
+    // .{ .name = "set_newindex_miss_handler", .func = lua.wrap(set_newindex_miss_handler) },
 };
 
 fn buttons(state: *lua.Lua) i32 {
@@ -76,9 +79,48 @@ fn drawins(state: *lua.Lua) i32 {
     return 0;
 }
 
+fn setWallpaper(state: *lua.Lua, pattern: *cairo.cairo_pattern_t) bool {
+    const zany = zanylib.getZany(state);
+    const shell = zany.wm.root_shell;
+
+    const surface = cairo.cairo_image_surface_create_for_data(shell.buffer.data.ptr, cairo.CAIRO_FORMAT_ARGB32, @intCast(shell.width), @intCast(shell.height), @intCast(shell.width * 4));
+    const cr = cairo.cairo_create(surface);
+    cairo.cairo_set_source(cr, pattern);
+    cairo.cairo_set_operator(cr, cairo.CAIRO_OPERATOR_SOURCE);
+    cairo.cairo_paint(cr);
+    cairo.cairo_destroy(cr);
+    cairo.cairo_surface_flush(surface);
+
+    shell.surface.attach(shell.buffer.handle, 0, 0);
+    shell.surface.commit();
+
+    cairo.cairo_surface_destroy(globals.wallpaper);
+    globals.wallpaper = surface;
+    globals.signals.emit(state, "wallpaper_changed", 0);
+    return true;
+}
+
+/// Get the wallpaper as a cairo surface or set it as a cairo pattern.
+///
+/// @param pattern A cairo pattern as light userdata
+/// @return A cairo surface or nothing.
+/// @function wallpaper
+///
 fn wallpaper(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("root.wallpaper not implemented", .{});
+    @breakpoint();
+    if (state.getTop() == 1) {
+        const pattern = state.toUserdata(cairo.cairo_pattern_t, -1) catch |err| {
+            log.warn("Error getting wallpaper userdata: {t}", .{err});
+            return 0;
+        };
+        state.pushBoolean(setWallpaper(state, pattern));
+        return 1;
+    }
+
+    if (globals.wallpaper) |wp| {
+        state.pushLightUserdata(cairo.cairo_surface_reference(wp));
+        return 1;
+    }
     return 0;
 }
 
@@ -88,11 +130,19 @@ fn get_content(state: *lua.Lua) i32 {
     return 0;
 }
 
-fn size(state: *lua.Lua) i32 {
+fn getRootSize(state: *lua.Lua) Area {
     const zany = zanylib.getZany(state);
-    const root = zany.wm.outputs.first() orelse {
-        std.debug.panic("No outputs found", .{});
+    const shell = zany.wm.root_shell;
+    return .{
+        .x = 0,
+        .y = 0,
+        .width = shell.width,
+        .height = shell.height,
     };
+}
+
+fn size(state: *lua.Lua) i32 {
+    const root = getRootSize(state);
     state.pushInteger(root.width);
     state.pushInteger(root.height);
     return 2;
@@ -106,10 +156,17 @@ fn size_mm(state: *lua.Lua) i32 {
     return 2;
 }
 
+/// Get the attached tags.
+/// @return A table with all tags.
+/// @function tags
+///
 fn tags(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("root.tags not implemented", .{});
-    return 0;
+    state.createTable(@intCast(globals.tags.items.len), 0);
+    for (globals.tags.items, 1..) |tag, i| {
+        _ = Object.push(state, tag);
+        state.rawSetIndex(-2, @intCast(i));
+    }
+    return 1;
 }
 
 fn index(state: *lua.Lua) i32 {

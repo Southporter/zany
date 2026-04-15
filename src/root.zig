@@ -2,6 +2,7 @@ const std = @import("std");
 const options = @import("options");
 const lua = @import("lua");
 const pixbuf = @import("pixbuf");
+const xkb = @import("xkb");
 const WindowManager = @import("WindowManager.zig");
 const zany_lua = @import("./lua.zig");
 const zany_lib = @import("./lua/lib.zig");
@@ -133,6 +134,8 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
     // selection_setup(L);
 
     try zany_lua.initRng(vm);
+    // Request initial window/output/seat messages
+    try self.wm.poll();
 
     // Parse and run configuration file before adding the screens */
     if (config.auto_screen == .off) {
@@ -144,8 +147,6 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
         };
     }
 
-    // Request initial window/output/seat messages
-    try self.wm.poll();
     // init screens information */
     try self.screen_scan();
 
@@ -593,19 +594,15 @@ fn index(state: *Lua) i32 {
         _ = state.pushString(hostname);
         return 1;
     }
-    //
-    // if(A_STREQ(buf, "themes_path"))
-    // {
-    //     lua_pushliteral(L, AWESOME_THEMES_PATH);
-    //     return 1;
-    // }
-    //
-    // if(A_STREQ(buf, "icon_path"))
-    // {
-    //     lua_pushliteral(L, AWESOME_ICON_PATH);
-    //     return 1;
-    // }
-    //
+    if (std.mem.eql(u8, "themes_path", buf)) {
+        _ = state.pushString(options.themes_path);
+        return 1;
+    }
+    if (std.mem.eql(u8, "icon_path", buf)) {
+        _ = state.pushString(options.icon_path);
+        return 1;
+    }
+
     return defaults.index(state);
 }
 
@@ -614,15 +611,46 @@ fn xkb_set_layout_group(state: *Lua) i32 {
     std.debug.panic("awesome.xkb_set_layout_group not implemented", .{});
     return 0;
 }
+
+///
+/// Get current layout number.
+///
+/// @function xkb_get_layout_group
+/// @treturn integer num Current layout number, integer from 0 to 3.
+///
 fn xkb_get_layout_group(state: *Lua) i32 {
-    _ = state;
-    std.debug.panic("awesome.xkb_get_layout_group not implemented", .{});
-    return 0;
+    const zany = zany_lib.getZany(state);
+    state.pushInteger(zany.wm.keyboard.idx);
+    return 1;
 }
+
+fn groupNameFromLayout(name: []const u8) []const u8 {
+    if (std.ascii.eqlIgnoreCase("english (us)", name)) {
+        return "us";
+    }
+    log.warn("Unknown Layout name: \"{s}\"", .{name});
+    return name;
+}
+
+///
+/// Get layout short names.
+///
+/// @function xkb_get_group_names
+/// @treturn string A string describing the current layout settings,
+///   e.g.: 'pc+us+de:2+inet(evdev)+group(alt_shift_toggle)+ctrl(nocaps)'
+///
 fn xkb_get_group_names(state: *Lua) i32 {
-    _ = state;
-    std.debug.panic("awesome.xkb_get_group_names not implemented", .{});
-    return 0;
+    const zany = zany_lib.getZany(state);
+    const kb = zany.wm.keyboard;
+    var buf: [256]u8 = undefined;
+    const name = std.fmt.bufPrintZ(&buf, "{s}:{d}", .{
+        //kb.name,
+        groupNameFromLayout(kb.name),
+        kb.idx,
+    }) catch unreachable;
+    log.debug("Sending group name: ({s})", .{name});
+    _ = state.pushStringZ(name);
+    return 1;
 }
 fn xrdb_get_value(state: *Lua) i32 {
     zany_lua.deprecate(@src(), state, "awesome.xrdb_get_value");

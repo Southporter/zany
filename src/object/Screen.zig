@@ -214,10 +214,8 @@ pub fn swap(state: *lua.Lua) i32 {
 }
 
 pub fn getGeometry(state: *lua.Lua, obj: *Object) i32 {
-    _ = state;
-    _ = obj;
-    std.debug.panic("screen.geometry not implemented", .{});
-    return 0;
+    const screen: *Screen = @fieldParentPtr("obj", obj);
+    return screen.geometry.push(state);
 }
 // luaA_screen_get_index
 pub fn getIndex(state: *lua.Lua, obj: *Object) i32 {

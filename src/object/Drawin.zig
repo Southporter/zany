@@ -155,7 +155,7 @@ fn new(state: *lua.Lua) ?*Object {
     // /* Set the right properties */
     // ewmh_update_window_type(w->window, window_translate_type(w->type));
     // ewmh_update_strut(w->window, &w->strut);
-    return drawin;
+    return &drawin.window.obj;
 }
 
 fn refreshPixmap() void {

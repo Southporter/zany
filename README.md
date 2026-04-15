@@ -15,6 +15,10 @@ Zig is used and licensed under MIT. Copyright belongs to the Zig authors.
 | --- | --- | --- |
 | Wayland Scanner | `wayland-devel` | |
 | Wayland Protocols | `wayland-protocol` | |
+| Cairo Headers | `cairo-devel` | |
+| GDK Pixbuf Headers | `gdk-pixbuf2-devel` | |
+| Glib headers | `glib-devel` | |
+| xkbcommon headers | `libxkbcommon-devel` | |
 
 ### Runtime
 Lua Dependencies:
@@ -26,5 +30,6 @@ Lua Dependencies:
 | Cairo gobject | `cairo-gobject` | `libcairo-gobject2` |
 | libango | `pango` | `libpango-1.0-0` |
 | gdk pixbuf | `gdk-pixbuf2` | |
+
 
 
