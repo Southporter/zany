@@ -1,13 +1,16 @@
 const std = @import("std");
 const lua = @import("lua");
-const cairo = @import("cairo");
+const c = @import("deps");
 const zanylib = @import("lib.zig");
 const luaZ = @import("../lua.zig");
+const defaults = @import("../defaults.zig");
 const cursorlib = @import("./cursor.zig");
 const CursorShape = @import("wayland").client.wp.CursorShapeDeviceV1.Shape;
 const Area = @import("../common/Area.zig");
 const globals = @import("../globals.zig");
 const Object = @import("../object/Object.zig");
+const Button = @import("../object/Button.zig");
+const Key = @import("../object/Key.zig");
 const log = std.log.scoped(.root);
 
 pub const lib = [_]lua.FnReg{
@@ -20,22 +23,82 @@ pub const lib = [_]lua.FnReg{
     .{ .name = "size", .func = lua.wrap(size) },
     .{ .name = "size_mm", .func = lua.wrap(size_mm) },
     .{ .name = "tags", .func = lua.wrap(tags) },
-    .{ .name = "__index", .func = lua.wrap(index) },
-    .{ .name = "__newindex", .func = lua.wrap(newindex) },
+    .{ .name = "__index", .func = lua.wrap(defaults.index) },
+    .{ .name = "__newindex", .func = lua.wrap(defaults.newindex) },
     // .{ .name = "set_index_miss_handler", .func = lua.wrap(set_index_miss_handler) },
     // .{ .name = "set_call_handler", .func = lua.wrap(set_call_handler) },
     // .{ .name = "set_newindex_miss_handler", .func = lua.wrap(set_newindex_miss_handler) },
 };
 
+/// Get or set global mouse bindings.
+/// This binding will be available when you click on the root window.
+///
+/// @param button_table An array of mouse button bindings objects, or nothing.
+/// @return The array of mouse button bindings objects.
+/// @function buttons
+///
 fn buttons(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("root.buttons not implemented", .{});
-    return 0;
+    // if(lua_gettop(L) == 1)
+    if (state.getTop() == 1) {
+        zanylib.checkTable(state, 1);
+
+        for (globals.buttons.items) |button| {
+            Object.unref(state, button);
+        }
+        globals.buttons.clearRetainingCapacity();
+        state.pushNil();
+
+        while (state.next(1)) {
+            const button_raw = Object.ref(state, -1) orelse unreachable;
+            const button: *Button = @ptrCast(@alignCast(button_raw));
+            globals.buttons.append(globals.gpa, button) catch {
+                std.debug.panic("OOM in root.buttons", .{});
+            };
+        }
+        return 1;
+    }
+
+    state.createTable(@intCast(globals.buttons.items.len), 0);
+    for (globals.buttons.items, 1..) |button, i| {
+        _ = Object.push(state, button);
+        state.rawSetIndex(-2, @intCast(i));
+    }
+    return 1;
 }
+
+/// Get or set global key bindings.
+/// These bindings will be available when you press keys on the root window.
+///
+/// @tparam table|nil keys_array An array of key binding objects, or nothing.
+/// @return The array of key bindings objects of this client.
+/// @function keys
+///
 fn keys(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("root.keys not implemented", .{});
-    return 0;
+    // if(lua_gettop(L) == 1)
+    if (state.getTop() == 1) {
+        zanylib.checkTable(state, 1);
+
+        for (globals.keys.items) |key| {
+            Object.unref(state, key);
+        }
+        globals.keys.clearRetainingCapacity();
+        state.pushNil();
+        while (state.next(1)) {
+            const key_raw = Object.refClass(state, -1, &Key.key_class) orelse unreachable;
+            const key: *Key = @ptrCast(@alignCast(key_raw));
+            globals.keys.append(globals.gpa, key) catch unreachable;
+        }
+
+        std.debug.panic("Need to implement xwindow_grabkeys for river", .{});
+        return 1;
+    }
+
+    state.createTable(@intCast(globals.keys.items.len), 0);
+    for (globals.keys.items, 1..) |key, i| {
+        _ = Object.push(state, key);
+        state.rawSetIndex(-2, @intCast(i));
+    }
+    return 1;
 }
 
 // Set the root cursor
@@ -79,22 +142,22 @@ fn drawins(state: *lua.Lua) i32 {
     return 0;
 }
 
-fn setWallpaper(state: *lua.Lua, pattern: *cairo.cairo_pattern_t) bool {
+fn setWallpaper(state: *lua.Lua, pattern: *c.cairo_pattern_t) bool {
     const zany = zanylib.getZany(state);
     const shell = zany.wm.root_shell;
 
-    const surface = cairo.cairo_image_surface_create_for_data(shell.buffer.data.ptr, cairo.CAIRO_FORMAT_ARGB32, @intCast(shell.width), @intCast(shell.height), @intCast(shell.width * 4));
-    const cr = cairo.cairo_create(surface);
-    cairo.cairo_set_source(cr, pattern);
-    cairo.cairo_set_operator(cr, cairo.CAIRO_OPERATOR_SOURCE);
-    cairo.cairo_paint(cr);
-    cairo.cairo_destroy(cr);
-    cairo.cairo_surface_flush(surface);
+    const surface = c.cairo_image_surface_create_for_data(shell.buffer.data.ptr, c.CAIRO_FORMAT_ARGB32, @intCast(shell.width), @intCast(shell.height), @intCast(shell.width * 4));
+    const cr = c.cairo_create(surface);
+    c.cairo_set_source(cr, pattern);
+    c.cairo_set_operator(cr, c.CAIRO_OPERATOR_SOURCE);
+    c.cairo_paint(cr);
+    c.cairo_destroy(cr);
+    c.cairo_surface_flush(surface);
 
     shell.surface.attach(shell.buffer.handle, 0, 0);
     shell.surface.commit();
 
-    cairo.cairo_surface_destroy(globals.wallpaper);
+    c.cairo_surface_destroy(globals.wallpaper);
     globals.wallpaper = surface;
     globals.signals.emit(state, "wallpaper_changed", 0);
     return true;
@@ -109,7 +172,7 @@ fn setWallpaper(state: *lua.Lua, pattern: *cairo.cairo_pattern_t) bool {
 fn wallpaper(state: *lua.Lua) i32 {
     @breakpoint();
     if (state.getTop() == 1) {
-        const pattern = state.toUserdata(cairo.cairo_pattern_t, -1) catch |err| {
+        const pattern = state.toUserdata(c.cairo_pattern_t, -1) catch |err| {
             log.warn("Error getting wallpaper userdata: {t}", .{err});
             return 0;
         };
@@ -118,7 +181,7 @@ fn wallpaper(state: *lua.Lua) i32 {
     }
 
     if (globals.wallpaper) |wp| {
-        state.pushLightUserdata(cairo.cairo_surface_reference(wp));
+        state.pushLightUserdata(c.cairo_surface_reference(wp));
         return 1;
     }
     return 0;
@@ -167,18 +230,6 @@ fn tags(state: *lua.Lua) i32 {
         state.rawSetIndex(-2, @intCast(i));
     }
     return 1;
-}
-
-fn index(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("root.index not implemented", .{});
-    return 0;
-}
-
-fn newindex(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("root.newindex not implemented", .{});
-    return 0;
 }
 
 fn set_index_miss_handler(state: *lua.Lua) i32 {

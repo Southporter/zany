@@ -1,7 +1,7 @@
 const std = @import("std");
 const options = @import("options");
 const lua = @import("lua");
-const pixbuf = @import("pixbuf");
+const c = @import("deps");
 const xkb = @import("xkb");
 const WindowManager = @import("WindowManager.zig");
 const zany_lua = @import("./lua.zig");
@@ -370,7 +370,7 @@ fn load_image(state: *Lua) i32 {
     return 0;
 }
 fn pixbuf_to_surface(state: *Lua) i32 {
-    const buf = state.toUserdata(pixbuf.GdkPixbuf, 1) catch {
+    const buf = state.toUserdata(c.GdkPixbuf, 1) catch {
         log.warn("Unable to turn param into GdkPixbuf, not userdata", .{});
         state.pushNil();
         return 1;

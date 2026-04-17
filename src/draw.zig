@@ -1,29 +1,28 @@
 const std = @import("std");
-const pixbuf = @import("pixbuf");
-const cairo = @import("cairo");
+const c = @import("deps");
 const log = std.log.scoped(.draw);
 
 /// Create a surface object from this pixbuf
 /// \param buf The pixbuf
 /// \return Number of items pushed on the lua stack.
-pub fn surfaceFromPixbuf(buf: *pixbuf.GdkPixbuf) *cairo.cairo_surface_t {
-    const width = pixbuf.gdk_pixbuf_get_width(buf);
-    const height = pixbuf.gdk_pixbuf_get_height(buf);
-    const pix_stride = pixbuf.gdk_pixbuf_get_rowstride(buf);
-    var pixels = pixbuf.gdk_pixbuf_get_pixels(buf);
-    const channels = pixbuf.gdk_pixbuf_get_n_channels(buf);
-    var format = cairo.CAIRO_FORMAT_ARGB32;
+pub fn surfaceFromPixbuf(buf: *c.GdkPixbuf) *c.cairo_surface_t {
+    const width = c.gdk_pixbuf_get_width(buf);
+    const height = c.gdk_pixbuf_get_height(buf);
+    const pix_stride = c.gdk_pixbuf_get_rowstride(buf);
+    var pixels = c.gdk_pixbuf_get_pixels(buf);
+    const channels = c.gdk_pixbuf_get_n_channels(buf);
+    var format = c.CAIRO_FORMAT_ARGB32;
     if (channels == 3)
-        format = cairo.CAIRO_FORMAT_RGB24;
+        format = c.CAIRO_FORMAT_RGB24;
 
-    const surface = cairo.cairo_image_surface_create(format, width, height);
+    const surface = c.cairo_image_surface_create(format, width, height);
     // const surface = cairo.cairo_image_surface_create(format, width, height) orelse {
     //     log.warn("unable to create cairo image surface", .{});
     //     std.process.cleanExit();
     // };
-    cairo.cairo_surface_flush(surface);
-    const cairo_stride = cairo.cairo_image_surface_get_stride(surface);
-    var cairo_pixels = cairo.cairo_image_surface_get_data(surface);
+    c.cairo_surface_flush(surface);
+    const cairo_stride = c.cairo_image_surface_get_stride(surface);
+    var cairo_pixels = c.cairo_image_surface_get_data(surface);
 
     for (0..@intCast(height)) |_| {
         var row = pixels;
@@ -60,7 +59,7 @@ pub fn surfaceFromPixbuf(buf: *pixbuf.GdkPixbuf) *cairo.cairo_surface_t {
         cairo_pixels += @intCast(cairo_stride);
     }
 
-    cairo.cairo_surface_mark_dirty(surface);
+    c.cairo_surface_mark_dirty(surface);
     return surface orelse {
         unreachable;
     };

@@ -38,7 +38,7 @@ var props = [_]Class.Property{
     },
 };
 
-var key_class: Class = .{
+pub var key_class: Class = .{
     .name = "key",
     .allocator = new,
     .collector = wipe,

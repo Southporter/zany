@@ -1,5 +1,5 @@
 const std = @import("std");
-const cairo = @import("cairo");
+const c = @import("deps");
 const wayland = @import("wayland");
 const wl = wayland.client.wl;
 const WindowManager = @import("../WindowManager.zig");

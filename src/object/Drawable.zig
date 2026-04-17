@@ -1,11 +1,11 @@
 const std = @import("std");
 const lua = @import("lua");
-const cairo = @import("cairo");
+const c = @import("deps");
 const Area = @import("../common/Area.zig");
 const lib = @import("../lua/lib.zig");
 const Class = @import("Class.zig");
 const Object = @import("Object.zig");
-const zany = @import("../root.zig");
+const zany = @import("../zany.zig");
 const zanylua = @import("../lua.zig");
 const globals = @import("../globals.zig");
 
@@ -17,7 +17,7 @@ obj: Object = .{},
 refresh_callback: Callback = undefined,
 refresh_data: *anyopaque = undefined,
 refreshed: bool = false,
-surface: ?*cairo.cairo_surface_t = null,
+surface: ?*c.cairo_surface_t = null,
 geometry: Area = .{},
 // pixmap: Pixmap,
 

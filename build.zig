@@ -60,28 +60,22 @@ pub fn build(b: *std.Build) void {
         .shared = true,
     });
 
-    const pixbuf = b.addTranslateC(.{
-        .root_source_file = b.path("pkg/pixbuf.h"),
+    const deps = b.addTranslateC(.{
+        .root_source_file = b.path("c-deps.h"),
         .target = target,
         .optimize = optimize,
     });
-    pixbuf.addSystemIncludePath(.{ .cwd_relative = "/usr/include/gdk-pixbuf-2.0/" });
-    pixbuf.addSystemIncludePath(.{ .cwd_relative = "/usr/include/glib-2.0/" });
-    pixbuf.addSystemIncludePath(.{ .cwd_relative = "/usr/lib64/glib-2.0/include/" });
-    const cairo = b.addTranslateC(.{
-        .root_source_file = b.path("pkg/cairo-zany.h"),
-        .target = target,
-        .optimize = optimize,
-    });
-    cairo.addSystemIncludePath(.{ .cwd_relative = "/usr/include/cairo/" });
+    deps.addSystemIncludePath(.{ .cwd_relative = "/usr/include/gdk-pixbuf-2.0/" });
+    deps.addSystemIncludePath(.{ .cwd_relative = "/usr/include/glib-2.0/" });
+    deps.addSystemIncludePath(.{ .cwd_relative = "/usr/lib64/glib-2.0/include/" });
+    deps.addSystemIncludePath(.{ .cwd_relative = "/usr/include/cairo/" });
     const mod = b.addModule("zanywm", .{
-        .root_source_file = b.path("src/root.zig"),
+        .root_source_file = b.path("src/zany.zig"),
         .target = target,
         .imports = &.{
             .{ .name = "lua", .module = ziglua.module("zlua") },
             .{ .name = "wayland", .module = wayland },
-            .{ .name = "pixbuf", .module = pixbuf.createModule() },
-            .{ .name = "cairo", .module = cairo.createModule() },
+            .{ .name = "deps", .module = deps.createModule() },
             .{ .name = "xkb", .module = b.dependency("xkbcommon", .{}).module("xkbcommon") },
         },
         .link_libc = true,

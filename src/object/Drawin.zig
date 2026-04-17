@@ -3,7 +3,7 @@ const lua = @import("lua");
 const lib = @import("../lua/lib.zig");
 const Class = @import("Class.zig");
 const Object = @import("Object.zig");
-const zany = @import("../root.zig");
+const zany = @import("../zany.zig");
 const zanylua = @import("../lua.zig");
 const globals = @import("../globals.zig");
 const Drawable = @import("Drawable.zig");
@@ -178,8 +178,25 @@ fn call(state: *lua.Lua) i32 {
 }
 
 fn handleGeometry(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("drawin.geometry not implemented", .{});
+    const object = drawin_class.checkudata(state, 1) orelse {
+        return 0;
+    };
+    const window: *Window = @fieldParentPtr("obj", object);
+    const drawin: *Drawin = @fieldParentPtr("window", window);
+
+    if (state.getTop() == 2) {
+        lib.checkTable(state, 2);
+        std.debug.panic("handleGeometry set not implemented", .{});
+        // luaA_checktable(L, 2);
+        // wingeom.x = round(luaA_getopt_number_range(L, 2, "x", drawin->geometry.x, MIN_X11_COORDINATE, MAX_X11_COORDINATE));
+        // wingeom.y = round(luaA_getopt_number_range(L, 2, "y", drawin->geometry.y, MIN_X11_COORDINATE, MAX_X11_COORDINATE));
+        // wingeom.width = ceil(luaA_getopt_number_range(L, 2, "width", drawin->geometry.width, MIN_X11_SIZE, MAX_X11_SIZE));
+        // wingeom.height = ceil(luaA_getopt_number_range(L, 2, "height", drawin->geometry.height, MIN_X11_SIZE, MAX_X11_SIZE));
+        //
+        // if(wingeom.width > 0 && wingeom.height > 0)
+        //     drawin_moveresize(L, 1, wingeom);
+    }
+    return drawin.geometry.push(state);
 }
 
 fn get_x(state: *lua.Lua, obj: *Object) i32 {

@@ -2,7 +2,7 @@ const std = @import("std");
 const lua = @import("lua");
 const zanylua = @import("../lua.zig");
 const Class = @import("../object/Class.zig");
-const Zany = @import("../root.zig");
+const Zany = @import("../zany.zig");
 const log = std.log.scoped(.lualib);
 
 pub var dofunction_on_error: ?*const fn (state: *lua.Lua) i32 = null;
