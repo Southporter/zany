@@ -16,7 +16,7 @@ const Tag = @import("object/Tag.zig");
 const Window = @import("object/Window.zig");
 const Client = @import("object/Client.zig");
 const Object = @import("object/Object.zig");
-const base = @import("lua/base.zig");
+const root = @import("lua/root.zig");
 const mouse = @import("lua/mouse.zig");
 const Drawable = @import("object/Drawable.zig");
 const Drawin = @import("object/Drawin.zig");
@@ -101,7 +101,7 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
 
     try zany_lua.openLib(vm, "awesome", awesome_lib, awesome_lib);
     try zany_lua.setupSignals(vm, "awesome");
-    zany_lua.registerLib(vm, "root", &base.lib);
+    zany_lua.registerLib(vm, "root", &root.lib);
     vm.pop(1);
     zany_lua.registerLib(vm, "keygrabber", &keygrabber.lib);
     vm.pop(1);
