@@ -189,3 +189,55 @@ test "getZany stack effect" {
     // Stack effect should be 0
     try std.testing.expectEqual(0, state.getTop());
 }
+
+fn rangeError(state: *lua.Lua, narg: c_int, min: lua.Number, max: lua.Number) i32 {
+    const msg = state.pushFString("value in [%f, %f] expected, got %f", .{
+        min, max, state.toNumber(narg) catch std.math.inf(f64),
+    });
+
+    switch (lua.lang) {
+        .lua52, .lua53, .lua54 => {
+            state.traceback(state, null, 2);
+            state.concat(2);
+        },
+        else => {},
+    }
+    return state.argError(narg, msg);
+}
+
+fn numberError(state: *lua.Lua, n: c_int) noreturn {
+    const msg = state.pushFString("value at %d is not a Lua Number", .{n});
+    switch (lua.lang) {
+        .lua52, .lua53, .lua54 => {
+            state.traceback(state, null, 2);
+            state.concat(2);
+        },
+        else => {},
+    }
+    return state.argError(n, msg);
+}
+
+fn checkNumberRange(state: *lua.Lua, n: c_int, min: lua.Number, max: lua.Number) lua.Number {
+    const res = state.toNumber(n) catch numberError(state, n);
+    if (res < min or res > max) {
+        _ = rangeError(state, n, min, max);
+    }
+    return res;
+}
+
+fn optNumberRange(state: *lua.Lua, narg: c_int, def: lua.Number, min: lua.Number, max: lua.Number) lua.Number {
+    if (state.isNoneOrNil(narg)) {
+        return def;
+    }
+    return checkNumberRange(state, narg, min, max);
+}
+
+pub fn getOptNumberRange(state: *lua.Lua, idx: c_int, name: [:0]const u8, def: lua.Number, min: lua.Number, max: lua.Number) lua.Number {
+    const kind = state.getField(idx, name);
+    defer state.pop(1);
+
+    if (kind == .nil or kind == .number) {
+        return optNumberRange(state, -1, def, min, max);
+    }
+    return def;
+}

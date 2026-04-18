@@ -21,3 +21,7 @@ pub fn push(area: Area, state: *Lua) i32 {
     state.setField(-2, "height");
     return 1;
 }
+
+pub fn eql(a: Area, b: Area) bool {
+    return a.x == b.x and a.y == b.y and a.width == b.width and a.height == b.height;
+}

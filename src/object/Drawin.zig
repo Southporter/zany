@@ -177,6 +177,9 @@ fn call(state: *lua.Lua) i32 {
     return drawin_class.new(state);
 }
 
+const min_coordinate = std.math.minInt(i16);
+const max_coordinate = std.math.maxInt(i16);
+
 fn handleGeometry(state: *lua.Lua) i32 {
     const object = drawin_class.checkudata(state, 1) orelse {
         return 0;
@@ -186,17 +189,64 @@ fn handleGeometry(state: *lua.Lua) i32 {
 
     if (state.getTop() == 2) {
         lib.checkTable(state, 2);
-        std.debug.panic("handleGeometry set not implemented", .{});
-        // luaA_checktable(L, 2);
-        // wingeom.x = round(luaA_getopt_number_range(L, 2, "x", drawin->geometry.x, MIN_X11_COORDINATE, MAX_X11_COORDINATE));
-        // wingeom.y = round(luaA_getopt_number_range(L, 2, "y", drawin->geometry.y, MIN_X11_COORDINATE, MAX_X11_COORDINATE));
-        // wingeom.width = ceil(luaA_getopt_number_range(L, 2, "width", drawin->geometry.width, MIN_X11_SIZE, MAX_X11_SIZE));
-        // wingeom.height = ceil(luaA_getopt_number_range(L, 2, "height", drawin->geometry.height, MIN_X11_SIZE, MAX_X11_SIZE));
-        //
-        // if(wingeom.width > 0 && wingeom.height > 0)
-        //     drawin_moveresize(L, 1, wingeom);
+        const wingeom = Area{
+            .x = @intFromFloat(@round(lib.getOptNumberRange(state, 2, "x", @floatFromInt(drawin.geometry.x), min_coordinate, max_coordinate))),
+            .y = @intFromFloat(@round(lib.getOptNumberRange(state, 2, "y", @floatFromInt(drawin.geometry.y), min_coordinate, max_coordinate))),
+            .width = @intFromFloat(@round(lib.getOptNumberRange(state, 2, "width", @floatFromInt(drawin.geometry.width), min_coordinate, max_coordinate))),
+            .height = @intFromFloat(@round(lib.getOptNumberRange(state, 2, "height", @floatFromInt(drawin.geometry.height), min_coordinate, max_coordinate))),
+        };
+
+        if (wingeom.width > 0 and wingeom.height > 0) {
+            drawin.moveResize(state, 1, wingeom);
+        }
     }
     return drawin.geometry.push(state);
+}
+/// Move and/or resize a drawin
+/// \param L The Lua VM state.
+/// \param udx The index of the drawin.
+/// \param geometry The new geometry.
+///
+/// drawin_moveresize
+fn moveResize(drawin: *Drawin, state: *lua.Lua, udx: c_int, geometry: Area) void {
+    const old_geometry = drawin.geometry;
+
+    drawin.geometry = geometry;
+    if (drawin.geometry.width <= 0)
+        drawin.geometry.width = old_geometry.width;
+    if (drawin.geometry.height <= 0)
+        drawin.geometry.height = old_geometry.height;
+
+    drawin.geometry_dirty = true;
+    drawin.updateDrawing(state, udx);
+
+    if (!old_geometry.eql(drawin.geometry)) {
+        Object.emitSignal(state, udx, "property::geometry", 0);
+    }
+    if (old_geometry.x != drawin.geometry.x)
+        Object.emitSignal(state, udx, "property::x", 0);
+    if (old_geometry.y != drawin.geometry.y)
+        Object.emitSignal(state, udx, "property::y", 0);
+    if (old_geometry.width != drawin.geometry.width)
+        Object.emitSignal(state, udx, "property::width", 0);
+    if (old_geometry.height != drawin.geometry.height)
+        Object.emitSignal(state, udx, "property::height", 0);
+
+    @breakpoint();
+    // screen_t *old_screen = screen_getbycoord(old_geometry.x, old_geometry.y);
+    // screen_t *new_screen = screen_getbycoord(w->geometry.x, w->geometry.y);
+    // if (old_screen != new_screen && strut_has_value(&w->strut))
+    // {
+    //     screen_update_workarea(old_screen);
+    //     screen_update_workarea(new_screen);
+    // }
+}
+
+fn updateDrawing(w: *Drawin, state: *lua.Lua, widx: c_int) void {
+    const pushed = Object.pushItem(state, widx, w.drawable);
+    defer state.pop(pushed);
+
+    w.drawable.setGeometry(state, -1, w.geometry);
 }
 
 fn get_x(state: *lua.Lua, obj: *Object) i32 {

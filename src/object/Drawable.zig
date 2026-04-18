@@ -71,6 +71,47 @@ fn getGeometry(state: *lua.Lua) i32 {
     std.debug.panic("drawable.geometry not implemented", .{});
     return 0;
 }
+pub fn setGeometry(d: *Drawable, state: *lua.Lua, didx: c_int, geom: Area) void {
+    const old = d.geometry;
+    d.geometry = geom;
+
+    const size_changed = (old.width != geom.width) or (old.height != geom.height);
+    if (size_changed) {
+        d.unsetSurface();
+    }
+    if (size_changed and geom.width > 0 and geom.height > 0) {
+        @breakpoint();
+        // d->pixmap = xcb_generate_id(globalconf.connection);
+        // xcb_create_pixmap(globalconf.connection, globalconf.default_depth, d->pixmap,
+        //                   globalconf.screen->root, geom.width, geom.height);
+        // d->surface = cairo_xcb_surface_create(globalconf.connection,
+        //                                       d->pixmap, globalconf.visual,
+        //                                       geom.width, geom.height);
+        Object.emitSignal(state, didx, "property::surface", 0);
+    }
+
+    if (!old.eql(geom))
+        Object.emitSignal(state, didx, "property::geometry", 0);
+    if (old.x != geom.x)
+        Object.emitSignal(state, didx, "property::x", 0);
+    if (old.y != geom.y)
+        Object.emitSignal(state, didx, "property::y", 0);
+    if (old.width != geom.width)
+        Object.emitSignal(state, didx, "property::width", 0);
+    if (old.height != geom.height)
+        Object.emitSignal(state, didx, "property::height", 0);
+}
+
+fn unsetSurface(d: *Drawable) void {
+    c.cairo_surface_finish(d.surface);
+    c.cairo_surface_destroy(d.surface);
+
+    // if (d->pixmap)
+    //     xcb_free_pixmap(globalconf.connection, d->pixmap);
+    d.refreshed = false;
+    d.surface = null;
+    // d->pixmap = XCB_NONE;
+}
 
 fn getSurface(state: *lua.Lua, obj: *Object) i32 {
     _ = state;
