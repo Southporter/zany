@@ -181,7 +181,7 @@ fn wallpaper(state: *lua.Lua) i32 {
     }
 
     if (globals.wallpaper) |wp| {
-        state.pushLightUserdata(c.cairo_surface_reference(wp));
+        state.pushLightUserdata(c.cairo_surface_reference(wp).?);
         return 1;
     }
     return 0;

@@ -18,3 +18,7 @@ pub var stack: std.ArrayList(*Client) = .empty;
 pub var gpa: std.mem.Allocator = undefined;
 
 pub var wallpaper: ?*c.cairo_surface_t = null;
+pub var focus: struct {
+    client: ?*Client = null,
+    need_update: bool = false,
+} = .{};

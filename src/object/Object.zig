@@ -301,7 +301,7 @@ pub fn pushItem(state: *lua.Lua, ud: i32, pointer: ?*anyopaque) i32 {
     // Get env table of the object
     zanylua.getuservalue(state, ud);
     // Push key
-    state.pushLightUserdata(pointer);
+    state.pushLightUserdata(pointer.?);
     // Get env.pointer
     const kind = state.rawGetTable(-2);
     // TODO: Check this somehow

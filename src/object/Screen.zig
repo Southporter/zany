@@ -279,7 +279,7 @@ pub fn add(state: *lua.Lua) !?*Screen {
     return screen;
 }
 
-fn getPrimary(state: *lua.Lua) ?*Screen {
+pub fn getPrimary(state: *lua.Lua) ?*Screen {
     if (globals.primary_screen == null and globals.screens.items.len > 0) {
         globals.primary_screen = globals.screens.items[0];
         _ = Object.push(state, globals.primary_screen.?);
@@ -287,4 +287,69 @@ fn getPrimary(state: *lua.Lua) ?*Screen {
         state.pop(1);
     }
     return globals.primary_screen;
+}
+
+///* Return the first screen number where the coordinates belong to.
+/// \param x X coordinate
+/// \param y Y coordinate
+/// \return Screen pointer or screen param if no match or no multi-head.
+pub fn getByCoord(x: c_int, y: c_int) ?*Screen {
+    for (globals.screens.items) |screen| {
+        if (screen.containsCoord(x, y)) {
+            return screen;
+        }
+    }
+
+    var nearest_screen: ?*Screen = null;
+    var nearest_dist: u32 = std.math.maxInt(u32);
+    for (globals.screens.items) |screen| {
+        const dist_sq = screen.getDistanceSquared(x, y);
+        if (dist_sq < nearest_dist) {
+            nearest_dist = dist_sq;
+            nearest_screen = screen;
+        }
+    }
+    return nearest_screen;
+}
+
+///* Are the given coordinates in a given screen?
+/// \param screen The logical screen number.
+/// \param x X coordinate
+/// \param y Y coordinate
+/// \return True if the X/Y coordinates are in the given screen.
+///
+/// From: screen_coord_in_screen
+fn containsCoord(s: *Screen, x: c_int, y: c_int) bool {
+    return (x >= s.geometry.x and x < s.geometry.x + @as(i32, @intCast(s.geometry.width))) and
+        (y >= s.geometry.y and y < s.geometry.y + @as(i32, @intCast(s.geometry.height)));
+}
+
+///* Return the squared distance of the given screen to the coordinates.
+/// \param screen The screen
+/// \param x X coordinate
+/// \param y Y coordinate
+/// \return Squared distance of the point to the screen.
+///
+/// From: screen_get_distance_squared
+fn getDistanceSquared(s: *Screen, x: c_int, y: c_int) u32 {
+    const sx = s.geometry.x;
+    const sy = s.geometry.y;
+    const sheight: i32 = @intCast(s.geometry.height);
+    const swidth: i32 = @intCast(s.geometry.width);
+
+    //Calculate distance in X coordinate
+    const dist_x = blk: {
+        if (x < sx) break :blk sx - x;
+        if (x < sx + swidth) break :blk 0;
+        break :blk x - sx - swidth;
+    };
+
+    // Calculate distance in Y coordinate
+    const dist_y = blk: {
+        if (y < sy) break :blk sy - y;
+        if (y < sy + sheight) break :blk 0;
+        break :blk y - sy - sheight;
+    };
+
+    return @intCast(dist_x * dist_x + dist_y * dist_y);
 }

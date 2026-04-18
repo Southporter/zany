@@ -253,7 +253,7 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, res: *Regi
             } else if (std.mem.orderZ(u8, global.interface, river.XkbBindingsV1.interface.name) == .eq) {
                 res.rbind = registry.bind(global.name, river.XkbBindingsV1, 2) catch return;
             } else if (std.mem.orderZ(u8, global.interface, wp.CursorShapeManagerV1.interface.name) == .eq) {
-                res.cursor = registry.bind(global.name, wp.CursorShapeManagerV1, 2) catch return;
+                res.cursor = registry.bind(global.name, wp.CursorShapeManagerV1, 1) catch return;
             } else if (std.mem.orderZ(u8, global.interface, river.XkbConfigV1.interface.name) == .eq) {
                 res.xkb_config = registry.bind(global.name, river.XkbConfigV1, 1) catch return;
             }
@@ -275,6 +275,46 @@ const Seat = struct {
     const Cursor = struct {
         pointer: *wl.Pointer,
         shape_device: *wp.CursorShapeDeviceV1,
+        button_state: std.StaticBitSet(32),
+        position: struct {
+            x: i24 = -1,
+            y: i24 = -1,
+        } = .{},
+
+        fn listener(pointer: *wl.Pointer, event: wl.Pointer.Event, data: *?Cursor) void {
+            _ = pointer;
+            log.debug("Got pointer event: {t}", .{event});
+            switch (event) {
+                .enter => {},
+                .leave => {},
+                .motion => |evt| {
+                    if (data.*) |*cursor| {
+                        cursor.position.x = evt.surface_x.toInt();
+                        cursor.position.y = evt.surface_y.toInt();
+                    }
+                },
+                .button => |evt| switch (evt.state) {
+                    .pressed => {
+                        if (data.*) |*cursor| {
+                            cursor.button_state.set(evt.button);
+                        }
+                    },
+                    .released => {
+                        if (data.*) |*cursor| {
+                            cursor.button_state.unset(evt.button);
+                        }
+                    },
+                    else => {},
+                },
+                .axis => {},
+                .frame => {},
+                .axis_source => {},
+                .axis_stop => {},
+                .axis_discrete => {},
+                .axis_value120 => {},
+                .axis_relative_direction => {},
+            }
+        }
     };
 
     const Keybind = struct {
@@ -305,6 +345,7 @@ const Seat = struct {
                         log.warn("Unable to get pointer for seat {d}", .{evt.name});
                         return;
                     };
+                    pointer.setListener(*?Cursor, Cursor.listener, &seat.cursor);
                     const device = wm.globals.cursor.getPointer(pointer) catch {
                         log.warn("Unable to get cursor shape device", .{});
                         return;
@@ -312,6 +353,7 @@ const Seat = struct {
                     seat.cursor = .{
                         .pointer = pointer,
                         .shape_device = device,
+                        .button_state = .initEmpty(),
                     };
                 }
             },
