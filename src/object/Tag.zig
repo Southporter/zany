@@ -125,11 +125,15 @@ fn tagClient(state: *lua.Lua, client: *Client) void {
 // \param c the client
 // \param t the tag
 // \return true if the client is tagged with the tag, false otherwise.
-fn isTagged(tag: *Tag, client: *Client) bool {
+pub fn isTagged(tag: *Tag, client: *Client) bool {
     for (tag.clients.items) |c| {
         if (client == c) return true;
     }
     return false;
+}
+
+pub fn isSelected(tag: Tag) bool {
+    return tag.selected;
 }
 
 // Set the tag name.

@@ -673,10 +673,7 @@ fn screen_scan(zany: *Zany) !void {
             viewport.screen = s;
             s.viewport = viewport;
             s.lifecycle = .c;
-            s.geometry.x = viewport.x;
-            s.geometry.y = viewport.y;
-            s.geometry.height = @intCast(viewport.height);
-            s.geometry.width = @intCast(viewport.width);
+            s.geometry = viewport.geometry;
         }
     }
 }

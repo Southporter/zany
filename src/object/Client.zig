@@ -1,6 +1,7 @@
 const std = @import("std");
 const lua = @import("lua");
 const lib = @import("../lua/lib.zig");
+const zanylua = @import("../lua.zig");
 const globals = @import("../globals.zig");
 const wm = @import("../WindowManager.zig");
 const Window = @import("Window.zig");
@@ -542,9 +543,29 @@ fn keys(state: *lua.Lua) i32 {
     return 0;
 }
 fn isvisible(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("client `isvisible` not implemented", .{});
-    return 0;
+    const obj = client_class.checkudata(state, 1) orelse unreachable;
+    const win: *Window = @fieldParentPtr("obj", obj);
+    const client: *Client = @fieldParentPtr("window", win);
+    state.pushBoolean(client.isVisible());
+    return 1;
+}
+pub fn isVisible(c: *Client) bool {
+    return (!c.hidden and !c.minimized and c.onSelectedTags());
+}
+
+///* Returns true if a client is tagged with one of the active tags.
+/// \param c The client to check.
+/// \return true if the client is visible, false otherwise.
+fn onSelectedTags(c: *Client) bool {
+    if (c.sticky)
+        return true;
+
+    for (globals.tags.items) |tag| {
+        if (tag.isSelected() and tag.isTagged(c)) {
+            return true;
+        }
+    }
+    return false;
 }
 fn handleGeometry(state: *lua.Lua) i32 {
     _ = state;

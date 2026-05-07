@@ -9,6 +9,7 @@ const globals = @import("../globals.zig");
 const wm = @import("../WindowManager.zig");
 const Viewport = wm.Viewport;
 const Area = @import("../common/Area.zig");
+const Strut = @import("../common/Strut.zig");
 const log = std.log.scoped(.screen);
 
 const Screen = @This();
@@ -352,4 +353,82 @@ fn getDistanceSquared(s: *Screen, x: c_int, y: c_int) u32 {
     };
 
     return @intCast(dist_x * dist_x + dist_y * dist_y);
+}
+
+/// From COMPUTE_STRUT macro
+fn computeStrut(s: Strut, geo: Area, area: Area, accum: *Strut) void {
+    if (s.top_start_x > 0 or s.top_end_x > 0 or s.top > 0) {
+        if (s.top > 0) {
+            accum.top = @max(accum.top, s.top);
+        } else {
+            const y: u32 = @intCast(geo.y - area.y);
+            const new_top: u16 = @intCast(y + geo.height);
+            accum.top = @max(accum.top, new_top);
+        }
+    }
+    if (s.bottom_start_x > 0 or s.bottom_end_x > 0 or s.bottom > 0) {
+        if (s.bottom > 0) {
+            accum.bottom = @max(accum.bottom, s.bottom);
+        } else {
+            const area_height: i32 = @intCast(area.height);
+            const y = area.y + area_height;
+            const new_bottom: u16 = @intCast(y - geo.y);
+            accum.bottom = @max(accum.bottom, new_bottom);
+        }
+    }
+    if (s.left_start_y > 0 or s.left_end_y > 0 or s.left > 0) {
+        if (s.left > 0) {
+            accum.left = @max(accum.left, s.left);
+        } else {
+            const geo_width: i32 = @intCast(geo.width);
+            const new_left: u16 = @intCast((geo.x - area.x) + geo_width);
+            accum.left = @max(accum.left, new_left);
+        }
+    }
+    if (s.right_start_y > 0 or s.right_end_y > 0 or s.right > 0) {
+        if (s.right > 0) {
+            accum.right = @max(accum.right, s.right);
+        } else {
+            const area_width: i32 = @intCast(area.width);
+            const x = area.x + area_width;
+            const new_right: u16 = @intCast(x - geo.x);
+            accum.right = @max(accum.right, new_right);
+        }
+    }
+}
+
+pub fn updateWorkarea(screen: *Screen) void {
+    var area = screen.geometry;
+    var strut = Strut{};
+
+    for (globals.clients.items) |client| {
+        if (client.screen == screen and client.isVisible()) {
+            computeStrut(client.window.strut, client.geometry, area, &strut);
+        }
+    }
+    for (globals.drawins.items) |drawin| {
+        if (drawin.visible) {
+            const d_screen = Screen.getByCoord(drawin.geometry.x, drawin.geometry.y);
+            if (screen == d_screen) {
+                computeStrut(drawin.window.strut, drawin.geometry, area, &strut);
+            }
+        }
+    }
+
+    area.x += strut.left;
+    area.y += strut.top;
+    area.width -= @min(area.width, strut.left + strut.right);
+    area.height -= @min(area.height, strut.top + strut.bottom);
+
+    if (area.eql(screen.workarea))
+        return;
+
+    // const old_workarea = screen.workarea;
+    screen.workarea = area;
+    @breakpoint();
+    // lua_State *L = globalconf_get_lua_State();
+    // luaA_object_push(L, screen);
+    // luaA_pusharea(L, old_workarea);
+    // luaA_object_emit_signal(L, -2, "property::workarea", 1);
+    // lua_pop(L, 1);
 }

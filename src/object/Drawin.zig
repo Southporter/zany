@@ -1,5 +1,6 @@
 const std = @import("std");
 const lua = @import("lua");
+const c = @import("deps");
 const lib = @import("../lua/lib.zig");
 const Class = @import("Class.zig");
 const Object = @import("Object.zig");
@@ -8,6 +9,8 @@ const zanylua = @import("../lua.zig");
 const globals = @import("../globals.zig");
 const Drawable = @import("Drawable.zig");
 const Window = @import("Window.zig");
+const Screen = @import("Screen.zig");
+const Strut = @import("../common/Strut.zig");
 const Area = @import("../common/Area.zig");
 
 const log = std.log.scoped(.drawin);
@@ -233,13 +236,34 @@ fn moveResize(drawin: *Drawin, state: *lua.Lua, udx: c_int, geometry: Area) void
         Object.emitSignal(state, udx, "property::height", 0);
 
     @breakpoint();
-    // screen_t *old_screen = screen_getbycoord(old_geometry.x, old_geometry.y);
-    // screen_t *new_screen = screen_getbycoord(w->geometry.x, w->geometry.y);
-    // if (old_screen != new_screen && strut_has_value(&w->strut))
-    // {
-    //     screen_update_workarea(old_screen);
-    //     screen_update_workarea(new_screen);
-    // }
+    const old_screen = Screen.getByCoord(old_geometry.x, old_geometry.y);
+    const new_screen = Screen.getByCoord(drawin.geometry.x, drawin.geometry.y);
+    if (old_screen != new_screen and drawin.window.strut.hasValue()) {
+        old_screen.?.updateWorkarea();
+        new_screen.?.updateWorkarea();
+    }
+}
+
+fn applyMoveResize(drawin: *Drawin) void {
+    if (!drawin.geometry_dirty) {
+        return;
+    }
+
+    drawin.geometry_dirty = false;
+
+    @breakpoint();
+    // client_ignore_enterleave_events();
+    // xcb_configure_window(globalconf.connection, w->window,
+    //                      XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y
+    //                      | XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT,
+    //                      (const uint32_t [])
+    //                      {
+    //                          w->geometry.x,
+    //                          w->geometry.y,
+    //                          w->geometry.width,
+    //                          w->geometry.height
+    //                      });
+    // client_restore_enterleave_events();
 }
 
 fn updateDrawing(w: *Drawin, state: *lua.Lua, widx: c_int) void {
@@ -318,16 +342,36 @@ fn set_height(state: *lua.Lua, obj: *Object) i32 {
     return 0;
 }
 
+///* Get the drawin's clip shape.
+/// \param L The Lua VM state.
+/// \param drawin The drawin object.
+/// \return The number of elements pushed on stack.
+////
 fn get_shape_bounding(state: *lua.Lua, obj: *Object) i32 {
     _ = state;
     _ = obj;
     std.debug.panic("drawin `get_shape_bounding` not implemented", .{});
     return 0;
 }
+///* Set the drawin's bounding shape.
+/// \param L The Lua VM state.
+/// \param drawin The drawin object.
+/// \return The number of elements pushed on stack.
 fn set_shape_bounding(state: *lua.Lua, obj: *Object) i32 {
-    _ = state;
-    _ = obj;
-    std.debug.panic("drawin `set_shape_bounding` not implemented", .{});
+    if (!state.isNil(-1)) {
+        const surf = state.toUserdata(*c.cairo_surface_t, -1) catch null;
+        std.debug.panic("Got a surface. Don't know what to do with it: {*}", .{surf});
+    }
+    // The drawin might have been resized to a larger size. Apply that.
+    const win: *Window = @fieldParentPtr("obj", obj);
+    const drawin: *Drawin = @fieldParentPtr("window", win);
+    drawin.applyMoveResize();
+    //  Update the wl.Surface buffer for this drawin.
+    // xwindow_set_shape(drawin->window,
+    //         drawin->geometry.width + 2*drawin->border_width,
+    //         drawin->geometry.height + 2*drawin->border_width,
+    //         XCB_SHAPE_SK_BOUNDING, surf, -drawin->border_width);
+    Object.emitSignal(state, -3, "property::shape_bounding", 0);
     return 0;
 }
 fn get_shape_clip(state: *lua.Lua, obj: *Object) i32 {

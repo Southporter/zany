@@ -6,6 +6,7 @@ const Class = @import("Class.zig");
 const Object = @import("Object.zig");
 const Button = @import("Button.zig");
 const Color = @import("../Color.zig");
+const Strut = @import("../common/Strut.zig");
 const globals = @import("../globals.zig");
 const wm = @import("../WindowManager.zig");
 
@@ -20,7 +21,7 @@ window: ?*wm.Window = null,
 // xcb_window_t frame_window;
 opacity: f32 = 1.0,
 //  Strut
-// strut_t strut;
+strut: Strut = .{},
 //  Button bindings
 buttons: std.ArrayList(Button) = .empty,
 //  Do we have pending border changes?

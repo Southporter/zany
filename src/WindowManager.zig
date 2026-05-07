@@ -18,6 +18,7 @@ const RegistryResults = struct {
     compositor: ?*wl.Compositor = null,
     shm: ?*wl.Shm = null,
     seat: ?*wl.Seat = null,
+    output: ?*wl.Output = null,
     cursor: ?*wp.CursorShapeManagerV1 = null,
     rwm: ?*river.WindowManagerV1 = null,
     rbind: ?*river.XkbBindingsV1 = null,
@@ -27,6 +28,7 @@ const RegistryResults = struct {
         if (self.compositor) |compositor| compositor.destroy();
         if (self.shm) |shm| shm.destroy();
         if (self.seat) |seat| seat.destroy();
+        if (self.output) |output| output.destroy();
         if (self.cursor) |cursor| cursor.destroy();
         if (self.rwm) |rwm| rwm.destroy();
         if (self.rbind) |rbind| rbind.destroy();
@@ -37,6 +39,7 @@ globals: struct {
     compositor: *wl.Compositor,
     shm: *wl.Shm,
     seat: *wl.Seat,
+    output: *wl.Output,
     cursor: *wp.CursorShapeManagerV1,
     rwm: *river.WindowManagerV1,
     rbind: *river.XkbBindingsV1,
@@ -55,12 +58,31 @@ seats: wl.list.Head(Seat, .link) = undefined,
 outputs: wl.list.Head(Viewport, .link) = undefined,
 windows: wl.list.Head(Window, .link) = undefined,
 root_shell: struct {
-    width: u32 = 0,
-    height: u32 = 0,
+    top: i32 = 0,
+    bottom: i32 = 0,
+    left: i32 = 0,
+    right: i32 = 0,
     surface: *wl.Surface,
     shell_surface: *river.ShellSurfaceV1,
     buffer: Buffer,
     node: *river.NodeV1,
+
+    fn include(self: *@This(), area: Area) void {
+        const wm: *WM = @fieldParentPtr("root_shell", self);
+        self.top = @min(self.top, area.y);
+        self.bottom = @max(self.bottom, area.y + @as(i32, @intCast(area.height)));
+        self.left = @min(self.left, area.x);
+        self.right = @max(self.right, area.x + @as(i32, @intCast(area.width)));
+
+        const s = self.size();
+        self.buffer.resize(wm.globals.shm, s.width, s.height) catch unreachable;
+    }
+    pub fn size(self: @This()) struct { width: i32, height: i32 } {
+        return .{
+            .width = self.right - self.left,
+            .height = self.bottom - self.top,
+        };
+    }
 },
 keyboard: Keyboard = .{
     .handle = undefined,
@@ -92,6 +114,7 @@ pub fn init(wm: *WM, gpa: std.mem.Allocator) !void {
     const rbind = registy_results.rbind orelse return error.RiverXkbBindingsNotFound;
     const cursor = registy_results.cursor orelse return error.WaylandCursorManagerNotFound;
     const seat = registy_results.seat orelse return error.WaylandSeatNotFound;
+    const output = registy_results.output orelse return error.WaylandOutputNotFound;
 
     const root_surface = try compositor.createSurface();
     errdefer root_surface.destroy();
@@ -109,6 +132,7 @@ pub fn init(wm: *WM, gpa: std.mem.Allocator) !void {
             .registry = registry,
             .cursor = cursor,
             .seat = seat,
+            .output = output,
             .xkb_config = xkb_config,
         },
         .root_shell = .{
@@ -246,6 +270,8 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, res: *Regi
                 res.compositor = registry.bind(global.name, wl.Compositor, 6) catch return;
             } else if (std.mem.orderZ(u8, global.interface, wl.Seat.interface.name) == .eq) {
                 res.seat = registry.bind(global.name, wl.Seat, 9) catch return;
+            } else if (std.mem.orderZ(u8, global.interface, wl.Output.interface.name) == .eq) {
+                res.output = registry.bind(global.name, wl.Output, 4) catch return;
             } else if (std.mem.orderZ(u8, global.interface, wl.Shm.interface.name) == .eq) {
                 res.shm = registry.bind(global.name, wl.Shm, 2) catch return;
             } else if (std.mem.orderZ(u8, global.interface, river.WindowManagerV1.interface.name) == .eq) {
@@ -410,12 +436,14 @@ fn findSeat(wm: *WM, handle: *river.SeatV1) ?*Seat {
 ///   the C code is bent to share as much code as possible. This will reduce the
 ///   "dead code" and improve code coverage by the tests.
 pub const Viewport = struct {
+    const max_x = std.math.maxInt(i32);
+    const max_y = std.math.maxInt(i32);
     handle: *river.OutputV1,
     raw: u32 = 0,
-    x: i32 = -1,
-    y: i32 = -1,
-    height: isize = 0,
-    width: isize = 0,
+    geometry: Area = .{
+        .x = max_x,
+        .y = max_y,
+    },
     screen: *Screen = undefined,
     link: wl.list.Link = .{
         .next = null,
@@ -430,26 +458,15 @@ pub const Viewport = struct {
         };
         switch (event) {
             .position => |evt| {
-                o.x = evt.x;
-                o.y = evt.y;
-                if (!(o.height == 0 and o.width == 0)) {
-                    const max_width: u32 = @intCast(o.width + o.x);
-                    const max_height: u32 = @intCast(o.height + o.y);
-                    wm.root_shell.height = @max(max_height, wm.root_shell.height);
-                    wm.root_shell.width = @max(max_width, wm.root_shell.width);
-                    wm.root_shell.buffer.resize(wm.globals.shm, @intCast(max_width), @intCast(max_height)) catch unreachable;
+                if (evt.x < 0 or evt.y < 0) {
+                    log.warn("Output x or y is less than 0: ({d}, {d})", .{ evt.x, evt.y });
                 }
+                o.geometry.x = evt.x;
+                o.geometry.y = evt.y;
             },
             .dimensions => |evt| {
-                o.height = evt.height;
-                o.width = evt.width;
-                if (!(o.x == -1 and o.y == -1)) {
-                    const max_width: u32 = @intCast(o.width + o.x);
-                    const max_height: u32 = @intCast(o.height + o.y);
-                    wm.root_shell.height = @max(max_height, wm.root_shell.height);
-                    wm.root_shell.width = @max(max_width, wm.root_shell.width);
-                    wm.root_shell.buffer.resize(wm.globals.shm, @intCast(max_width), @intCast(max_height)) catch unreachable;
-                }
+                o.geometry.height = @intCast(evt.height);
+                o.geometry.width = @intCast(evt.width);
             },
             .wl_output => |evt| {
                 o.raw = evt.name;
@@ -460,6 +477,9 @@ pub const Viewport = struct {
                 wm.gpa.destroy(o);
                 // TODO: handle signal for removed outputs
             },
+        }
+        if (o.geometry.x < max_x and o.geometry.y < max_y and o.geometry.width != 0 and o.geometry.height != 0) {
+            wm.root_shell.include(o.geometry);
         }
     }
 };

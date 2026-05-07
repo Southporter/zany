@@ -145,8 +145,9 @@ fn drawins(state: *lua.Lua) i32 {
 fn setWallpaper(state: *lua.Lua, pattern: *c.cairo_pattern_t) bool {
     const zany = zanylib.getZany(state);
     const shell = zany.wm.root_shell;
+    const s = shell.size();
 
-    const surface = c.cairo_image_surface_create_for_data(shell.buffer.data.ptr, c.CAIRO_FORMAT_ARGB32, @intCast(shell.width), @intCast(shell.height), @intCast(shell.width * 4));
+    const surface = c.cairo_image_surface_create_for_data(shell.buffer.data.ptr, c.CAIRO_FORMAT_ARGB32, @intCast(s.width), @intCast(s.height), @intCast(s.width * 4));
     const cr = c.cairo_create(surface);
     c.cairo_set_source(cr, pattern);
     c.cairo_set_operator(cr, c.CAIRO_OPERATOR_SOURCE);
@@ -196,11 +197,12 @@ fn get_content(state: *lua.Lua) i32 {
 fn getRootSize(state: *lua.Lua) Area {
     const zany = zanylib.getZany(state);
     const shell = zany.wm.root_shell;
+    const s = shell.size();
     return .{
         .x = 0,
         .y = 0,
-        .width = shell.width,
-        .height = shell.height,
+        .width = @intCast(s.width),
+        .height = @intCast(s.height),
     };
 }
 
