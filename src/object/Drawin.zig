@@ -374,16 +374,42 @@ fn set_shape_bounding(state: *lua.Lua, obj: *Object) i32 {
     Object.emitSignal(state, -3, "property::shape_bounding", 0);
     return 0;
 }
+/// Get the drawin's clip shape.
+/// \param L The Lua VM state.
+/// \param drawin The drawin object.
+/// \return The number of elements pushed on stack.
+///
 fn get_shape_clip(state: *lua.Lua, obj: *Object) i32 {
+    // cairo_surface_t *surf = xwindow_get_shape(drawin->window, XCB_SHAPE_SK_CLIP);
+    // if (!surf)
     _ = state;
     _ = obj;
-    std.debug.panic("drawin `get_shape_clip` not implemented", .{});
     return 0;
+    // /* lua has to make sure to free the ref or we have a leak */
+    // lua_pushlightuserdata(L, surf);
+    // return 1;
 }
+/// Set the drawin's clip shape.
+/// \param L The Lua VM state.
+/// \param drawin The drawin object.
+/// \return The number of elements pushed on stack.
 fn set_shape_clip(state: *lua.Lua, obj: *Object) i32 {
-    _ = state;
-    _ = obj;
-    std.debug.panic("drawin `set_shape_clip` not implemented", .{});
+    var surf: ?*c.cairo_surface_t = null;
+    if (!state.isNil(-1)) {
+        surf = state.toUserdata(c.cairo_surface_t, -1);
+    }
+
+    const win: *Window = @fieldParentPtr("obj", obj);
+    const drawin: *Drawin = @fieldParentPtr("window", win);
+
+    // The drawin might have been resized to a larger size. Apply that.
+    drawin.applyMoveResize();
+
+    @breakpoint();
+
+    // xwindow_set_shape(drawin->window, drawin->geometry.width, drawin->geometry.height,
+    //         XCB_SHAPE_SK_CLIP, surf, 0);
+    Object.emitSignal(state, -3, "property::shape_clip", 0);
     return 0;
 }
 fn get_shape_input(state: *lua.Lua, obj: *Object) i32 {

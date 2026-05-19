@@ -17,8 +17,6 @@ const river = wayland.client.river;
 const RegistryResults = struct {
     compositor: ?*wl.Compositor = null,
     shm: ?*wl.Shm = null,
-    seat: ?*wl.Seat = null,
-    output: ?*wl.Output = null,
     cursor: ?*wp.CursorShapeManagerV1 = null,
     rwm: ?*river.WindowManagerV1 = null,
     rbind: ?*river.XkbBindingsV1 = null,
@@ -27,8 +25,6 @@ const RegistryResults = struct {
     fn destroy(self: RegistryResults) void {
         if (self.compositor) |compositor| compositor.destroy();
         if (self.shm) |shm| shm.destroy();
-        if (self.seat) |seat| seat.destroy();
-        if (self.output) |output| output.destroy();
         if (self.cursor) |cursor| cursor.destroy();
         if (self.rwm) |rwm| rwm.destroy();
         if (self.rbind) |rbind| rbind.destroy();
@@ -38,8 +34,6 @@ const RegistryResults = struct {
 globals: struct {
     compositor: *wl.Compositor,
     shm: *wl.Shm,
-    seat: *wl.Seat,
-    output: *wl.Output,
     cursor: *wp.CursorShapeManagerV1,
     rwm: *river.WindowManagerV1,
     rbind: *river.XkbBindingsV1,
@@ -113,8 +107,6 @@ pub fn init(wm: *WM, gpa: std.mem.Allocator) !void {
     errdefer shm.destroy();
     const rbind = registy_results.rbind orelse return error.RiverXkbBindingsNotFound;
     const cursor = registy_results.cursor orelse return error.WaylandCursorManagerNotFound;
-    const seat = registy_results.seat orelse return error.WaylandSeatNotFound;
-    const output = registy_results.output orelse return error.WaylandOutputNotFound;
 
     const root_surface = try compositor.createSurface();
     errdefer root_surface.destroy();
@@ -131,8 +123,6 @@ pub fn init(wm: *WM, gpa: std.mem.Allocator) !void {
             .display = display,
             .registry = registry,
             .cursor = cursor,
-            .seat = seat,
-            .output = output,
             .xkb_config = xkb_config,
         },
         .root_shell = .{
@@ -164,7 +154,6 @@ pub fn deinit(wm: *WM) void {
     wm.globals.rbind.destroy();
     wm.globals.rwm.destroy();
     wm.globals.cursor.destroy();
-    wm.globals.seat.destroy();
     wm.globals.shm.destroy();
     wm.globals.compositor.destroy();
     wm.globals.registry.destroy();
@@ -268,10 +257,6 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, res: *Regi
         .global => |global| {
             if (std.mem.orderZ(u8, global.interface, wl.Compositor.interface.name) == .eq) {
                 res.compositor = registry.bind(global.name, wl.Compositor, 6) catch return;
-            } else if (std.mem.orderZ(u8, global.interface, wl.Seat.interface.name) == .eq) {
-                res.seat = registry.bind(global.name, wl.Seat, 9) catch return;
-            } else if (std.mem.orderZ(u8, global.interface, wl.Output.interface.name) == .eq) {
-                res.output = registry.bind(global.name, wl.Output, 4) catch return;
             } else if (std.mem.orderZ(u8, global.interface, wl.Shm.interface.name) == .eq) {
                 res.shm = registry.bind(global.name, wl.Shm, 2) catch return;
             } else if (std.mem.orderZ(u8, global.interface, river.WindowManagerV1.interface.name) == .eq) {
@@ -294,7 +279,7 @@ const Seat = struct {
         .next = null,
         .prev = null,
     },
-    seatId: u32 = undefined,
+    seat: ?*wl.Seat = null,
     cursor: ?Cursor = null,
     keybinder: *river.XkbBindingsSeatV1,
     keybinds: std.ArrayList(Keybind) = .empty,
@@ -365,9 +350,9 @@ const Seat = struct {
             .op_delta => {},
             .op_release => {},
             .wl_seat => |evt| {
-                seat.seatId = evt.name;
-                if (evt.name == wm.globals.seat.getId()) {
-                    const pointer = wm.globals.seat.getPointer() catch {
+                seat.seat = wm.globals.registry.bind(evt.name, wl.Seat, 9) catch null;
+                if (seat.seat) |s| {
+                    const pointer = s.getPointer() catch {
                         log.warn("Unable to get pointer for seat {d}", .{evt.name});
                         return;
                     };
@@ -439,11 +424,21 @@ pub const Viewport = struct {
     const max_x = std.math.maxInt(i32);
     const max_y = std.math.maxInt(i32);
     handle: *river.OutputV1,
-    raw: u32 = 0,
+    wl_output: ?*wl.Output = null,
     geometry: Area = .{
         .x = max_x,
         .y = max_y,
     },
+    size: struct {
+        width_mm: i32 = 0,
+        height_mm: i32 = 0,
+    } = .{},
+    orientation: wl.Output.Transform = .normal,
+    details: struct {
+        name: [:0]const u8 = "",
+        description: [:0]const u8 = "",
+    } = .{},
+    scale: i32 = 1,
     screen: *Screen = undefined,
     link: wl.list.Link = .{
         .next = null,
@@ -469,9 +464,15 @@ pub const Viewport = struct {
                 o.geometry.width = @intCast(evt.width);
             },
             .wl_output => |evt| {
-                o.raw = evt.name;
+                o.wl_output = wm.globals.registry.bind(evt.name, wl.Output, 4) catch null;
+                if (o.wl_output) |wl_output| {
+                    wl_output.setListener(*Viewport, outputListener, o);
+                }
             },
             .removed => {
+                if (o.wl_output) |wl_output| {
+                    wl_output.destroy();
+                }
                 o.handle.destroy();
                 remove(o.link);
                 wm.gpa.destroy(o);
@@ -480,6 +481,36 @@ pub const Viewport = struct {
         }
         if (o.geometry.x < max_x and o.geometry.y < max_y and o.geometry.width != 0 and o.geometry.height != 0) {
             wm.root_shell.include(o.geometry);
+        }
+    }
+
+    fn outputListener(wl_output: *wl.Output, event: wl.Output.Event, viewport: *Viewport) void {
+        _ = wl_output;
+        switch (event) {
+            .geometry => |evt| {
+                viewport.geometry.x = evt.x;
+                viewport.geometry.y = evt.y;
+                viewport.size.height_mm = evt.physical_height;
+                viewport.size.width_mm = evt.physical_width;
+                viewport.orientation = evt.transform;
+                log.debug("Found monitor: {s} {s}", .{ evt.make, evt.model });
+                log.debug("Monitor has {t} subpixels", .{evt.subpixel});
+            },
+            .description => |evt| {
+                viewport.details.description = std.mem.span(evt.description);
+            },
+            .name => |evt| {
+                viewport.details.name = std.mem.span(evt.name);
+            },
+            .scale => |evt| {
+                viewport.scale = evt.factor;
+            },
+            .done => {
+                log.info("Output events complete", .{});
+            },
+            .mode => {
+                log.info("Mode for output: {any}", .{event.mode});
+            },
         }
     }
 };

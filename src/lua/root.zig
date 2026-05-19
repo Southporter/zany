@@ -214,10 +214,16 @@ fn size(state: *lua.Lua) i32 {
 }
 
 fn size_mm(state: *lua.Lua) i32 {
-    // TODO: Figure out how to get this from river
-    // For now, push 0 as the MM for width and height
-    state.pushInteger(0);
-    state.pushInteger(0);
+    const zany = zanylib.getZany(state);
+    var total_height = 0;
+    var total_width = 0;
+    var iter = zany.wm.outputs.iterator(.forward);
+    while (iter.next()) |viewport| {
+        total_height += viewport.size.height_mm;
+        total_width += viewport.size.width_mm;
+    }
+    state.pushInteger(total_width);
+    state.pushInteger(total_height);
     return 2;
 }
 
