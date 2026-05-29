@@ -2,6 +2,7 @@ const std = @import("std");
 const lua = @import("lua");
 const c = @import("deps");
 const lib = @import("../lua/lib.zig");
+const cursor_lib = @import("../lua/cursor.zig");
 const Class = @import("Class.zig");
 const Object = @import("Object.zig");
 const zany = @import("../zany.zig");
@@ -161,8 +162,9 @@ fn new(state: *lua.Lua) ?*Object {
     return &drawin.window.obj;
 }
 
-fn refreshPixmap() void {
-    std.debug.panic("drawin refreshPixmap not implemented", .{});
+fn refreshPixmap(obj: *Object) void {
+    const drawin = fromObj(obj);
+    drawin.refreshPixmapPartial(0, 0, drawin.geometry.width, drawin.geometry.height);
 }
 
 fn wipe(obj: *Object) void {
@@ -178,6 +180,11 @@ fn get(state: *lua.Lua) i32 {
 }
 fn call(state: *lua.Lua) i32 {
     return drawin_class.new(state);
+}
+
+fn fromObj(obj: *Object) *Drawin {
+    const win: *Window = @fieldParentPtr("obj", obj);
+    return @fieldParentPtr("window", win);
 }
 
 const min_coordinate = std.math.minInt(i16);
@@ -396,7 +403,7 @@ fn get_shape_clip(state: *lua.Lua, obj: *Object) i32 {
 fn set_shape_clip(state: *lua.Lua, obj: *Object) i32 {
     var surf: ?*c.cairo_surface_t = null;
     if (!state.isNil(-1)) {
-        surf = state.toUserdata(c.cairo_surface_t, -1);
+        surf = state.toUserdata(c.cairo_surface_t, -1) catch unreachable;
     }
 
     const win: *Window = @fieldParentPtr("obj", obj);
@@ -412,57 +419,193 @@ fn set_shape_clip(state: *lua.Lua, obj: *Object) i32 {
     Object.emitSignal(state, -3, "property::shape_clip", 0);
     return 0;
 }
+
+/// Get the drawin's input shape.
+/// \param L The Lua VM state.
+/// \param drawin The drawin object.
+/// \return The number of elements pushed on stack.
 fn get_shape_input(state: *lua.Lua, obj: *Object) i32 {
     _ = state;
     _ = obj;
-    std.debug.panic("drawin `get_shape_input` not implemented", .{});
+    // cairo_surface_t *surf = xwindow_get_shape(drawin->window, XCB_SHAPE_SK_INPUT);
+    // if (!surf)
+    //     return 0;
+    // /* lua has to make sure to free the ref or we have a leak */
+    // lua_pushlightuserdata(L, surf);
+    // return 1;
+
+    log.warn("darwin.get_shape_input is missing xwindow translation", .{});
     return 0;
 }
+/// Set the drawin's input shape.
+/// \param L The Lua VM state.
+/// \param drawin The drawin object.
+/// \return The number of elements pushed on stack.
 fn set_shape_input(state: *lua.Lua, obj: *Object) i32 {
-    _ = state;
-    _ = obj;
-    std.debug.panic("drawin `set_shape_input` not implemented", .{});
+    var surf: ?*c.cairo_surface_t = null;
+    if (!state.isNil(-1)) {
+        surf = state.toUserdata(c.cairo_surface_t, -1) catch unreachable;
+    }
+
+    const drawin = fromObj(obj);
+    // The drawin might have been resized to a larger size. Apply that.
+    drawin.applyMoveResize();
+
+    log.warn("drawin.set_shape_input is missing xwindow translation", .{});
+    // xwindow_set_shape(drawin->window,
+    //         drawin->geometry.width + 2*drawin->border_width,
+    //         drawin->geometry.height + 2*drawin->border_width,
+    //         XCB_SHAPE_SK_INPUT, surf, -drawin->border_width);
+    _ = Object.emitSignal(state, -3, "property::shape_input", 0);
     return 0;
 }
 
 fn getDrawable(state: *lua.Lua, obj: *Object) i32 {
-    const window: *Window = @fieldParentPtr("obj", obj);
-    const drawin: *Drawin = @fieldParentPtr("window", window);
+    const drawin = fromObj(obj);
     return Object.pushItem(state, -2, drawin.drawable);
 }
 fn get_visible(state: *lua.Lua, obj: *Object) i32 {
-    const window: *Window = @fieldParentPtr("obj", obj);
-    const drawin: *Drawin = @fieldParentPtr("window", window);
+    const drawin = fromObj(obj);
     state.pushBoolean(drawin.visible);
     return 1;
 }
+/// Set a drawin visible or not.
+/// \param L The Lua VM state.
+/// \param udx The drawin.
+/// \param v The visible value.
 fn set_visible(state: *lua.Lua, obj: *Object) i32 {
-    const window: *Window = @fieldParentPtr("obj", obj);
-    const drawin: *Drawin = @fieldParentPtr("window", window);
-    drawin.visible = state.toBoolean(1);
+    const drawin = fromObj(obj);
+    const v = state.toBoolean(-1);
+    const udx: i32 = -3;
+    if (v != drawin.visible) {
+        drawin.visible = v;
+
+        if (drawin.visible) {
+            map(drawin, state, udx);
+            // duplicate drawin
+            state.pushValue(udx);
+            // ref it
+            _ = Object.refClass(state, -1, &drawin_class);
+        } else {
+            // Active BMA */
+            // client_ignore_enterleave_events();
+            // Unmap window */
+            drawin.unmap();
+            // Active BMA */
+            // client_restore_enterleave_events();
+            // unref it */
+            Object.unref(state, drawin);
+        }
+
+        Object.emitSignal(state, udx, "property::visible", 0);
+        if (drawin.window.strut.hasValue()) {
+            Screen.updateWorkarea(Screen.getByCoord(drawin.geometry.x, drawin.geometry.y) orelse unreachable);
+        }
+    }
     return 0;
 }
 fn get_ontop(state: *lua.Lua, obj: *Object) i32 {
-    const window: *Window = @fieldParentPtr("obj", obj);
-    const drawin: *Drawin = @fieldParentPtr("window", window);
+    const drawin = fromObj(obj);
     state.pushBoolean(drawin.ontop);
     return 1;
 }
+/// Set the drawin on top status.
+/// \param L The Lua VM state.
+/// \param drawin The drawin object.
+/// \return The number of elements pushed on stack.
+///
 fn set_ontop(state: *lua.Lua, obj: *Object) i32 {
-    const window: *Window = @fieldParentPtr("obj", obj);
-    const drawin: *Drawin = @fieldParentPtr("window", window);
-    drawin.ontop = state.toBoolean(1);
+    const drawin = fromObj(obj);
+    const b = lib.checkBoolean(state, -1);
+    if (b != drawin.ontop) {
+        drawin.ontop = b;
+        log.warn("drawin.set_ontop missing translation for `stack_windows`", .{});
+        // stack_windows();
+        Object.emitSignal(state, -3, "property::ontop", 0);
+    }
     return 0;
 }
 fn get_cursor(state: *lua.Lua, obj: *Object) i32 {
-    _ = state;
-    _ = obj;
-    std.debug.panic("cursor index property of drawin not implemented", .{});
+    const drawin = fromObj(obj);
+    _ = state.pushString(drawin.cursor);
+    return 1;
+}
+/// Set the drawin cursor.
+/// \param L The Lua VM state.
+/// \param drawin The drawin object.
+/// \return The number of elements pushed on stack.
+///
+fn set_cursor(state: *lua.Lua, obj: *Object) i32 {
+    const drawin = fromObj(obj);
+    const buf = state.checkString(-1);
+    const cursor_font = cursor_lib.fontFromStr(buf);
+    if (cursor_font) |_| {
+        globals.gpa.free(drawin.cursor);
+        drawin.cursor = globals.gpa.dupe(u8, buf) catch {
+            log.err("OOM: Duping cursor name", .{});
+            std.process.exit(242);
+        };
+        Object.emitSignal(state, -3, "property::cursor", 0);
+    }
     return 0;
 }
-fn set_cursor(state: *lua.Lua, obj: *Object) i32 {
-    _ = state;
-    _ = obj;
-    std.debug.panic("cursor new[index] property of drawin not implemented", .{});
-    return 0;
+
+fn map(drawin: *Drawin, state: *lua.Lua, widx: i32) void {
+
+    // Apply any pending changes */
+    drawin.applyMoveResize();
+    // Activate BMA */
+    @breakpoint();
+    // client_ignore_enterleave_events();
+    // Map the drawin */
+    // xcb_map_window(globalconf.connection, drawin.window);
+    // Deactivate BMA */
+    // client_restore_enterleave_events();
+    // Stack this drawin correctly */
+    // stack_windows();
+    // Add it to the list of visible drawins */
+    globals.drawins.append(globals.gpa, drawin) catch {
+        log.err("OOM: cannot append drawin", .{});
+        std.process.exit(242);
+    };
+    // Make sure it has a surface */
+    if (drawin.drawable.surface == null) drawin.updateDrawing(state, widx);
+}
+
+fn unmap(drawin: *Drawin) void {
+    // xcb_unmap_window(globalconf.connection, drawin->window);
+    for (globals.drawins.items, 0..) |d, i| {
+        if (d == drawin) {
+            _ = globals.drawins.swapRemove(i);
+            break;
+        }
+    }
+}
+
+/// Refresh the window content by copying its pixmap data to its window.
+/// \param drawin The drawin to refresh.
+/// \param x The copy starting point x component.
+/// \param y The copy starting point y component.
+/// \param w The copy width from the x component.
+/// \param h The copy height from the y component.
+///
+/// From: drawin_refresh_pixmap_partial
+fn refreshPixmapPartial(drawin: *Drawin, x: i32, y: i32, w: u32, h: u32) void {
+    _ = x;
+    _ = y;
+    _ = w;
+    _ = h;
+    // if (!drawin->drawable || !drawin->drawable->pixmap || !drawin->drawable->refreshed)
+    if (!drawin.drawable.refreshed)
+        return;
+
+    // Make sure it really has the size it should have
+    drawin.applyMoveResize();
+
+    // Make cairo do all pending drawing
+    @breakpoint();
+    // cairo_surface_flush(drawin->drawable->surface);
+    // xcb_copy_area(globalconf.connection, drawin->drawable->pixmap,
+    //               drawin->window, globalconf.gc, x, y, x, y,
+    //               w, h);
 }

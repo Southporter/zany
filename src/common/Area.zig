@@ -25,3 +25,16 @@ pub fn push(area: Area, state: *Lua) i32 {
 pub fn eql(a: Area, b: Area) bool {
     return a.x == b.x and a.y == b.y and a.width == b.width and a.height == b.height;
 }
+
+pub fn left(a: Area) i32 {
+    return a.x;
+}
+pub fn right(a: Area) i32 {
+    return a.x + @as(i32, @intCast(a.width));
+}
+pub fn top(a: Area) i32 {
+    return a.y;
+}
+pub fn bottom(a: Area) i32 {
+    return a.y + @as(i32, @intCast(a.height));
+}

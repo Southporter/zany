@@ -11,7 +11,7 @@ const globals = @import("../globals.zig");
 
 const Drawable = @This();
 
-const Callback = *const fn () void;
+const Callback = *const fn (*Object) void;
 
 obj: Object = .{},
 refresh_callback: Callback = undefined,

@@ -1,4 +1,5 @@
 const std = @import("std");
+const lua = @import("lua");
 const c = @import("deps");
 const Signals = @import("Signals.zig");
 const Screen = @import("object/Screen.zig");
@@ -24,3 +25,13 @@ pub var focus: struct {
     client: ?*Client = null,
     need_update: bool = false,
 } = .{};
+
+var lua_state: struct {
+    real_state_dont_use_directly: *lua.Lua = undefined,
+} = .{};
+
+/// You should always use this as lua_State *L = globalconf_get_lua_State().
+/// That way it becomes harder to introduce coroutine-related problems.
+pub fn getLuaState() *lua.Lua {
+    return lua_state.real_state_dont_use_directly;
+}

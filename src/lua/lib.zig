@@ -217,7 +217,7 @@ fn numberError(state: *lua.Lua, n: c_int) noreturn {
     return state.argError(n, msg);
 }
 
-fn checkNumberRange(state: *lua.Lua, n: c_int, min: lua.Number, max: lua.Number) lua.Number {
+pub fn checkNumberRange(state: *lua.Lua, n: c_int, min: lua.Number, max: lua.Number) lua.Number {
     const res = state.toNumber(n) catch numberError(state, n);
     if (res < min or res > max) {
         _ = rangeError(state, n, min, max);

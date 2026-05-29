@@ -215,8 +215,8 @@ fn size(state: *lua.Lua) i32 {
 
 fn size_mm(state: *lua.Lua) i32 {
     const zany = zanylib.getZany(state);
-    var total_height = 0;
-    var total_width = 0;
+    var total_height: i32 = 0;
+    var total_width: i32 = 0;
     var iter = zany.wm.outputs.iterator(.forward);
     while (iter.next()) |viewport| {
         total_height += viewport.size.height_mm;

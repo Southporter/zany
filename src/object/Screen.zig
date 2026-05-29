@@ -3,6 +3,7 @@ const lua = @import("lua");
 const lib = @import("../lua/lib.zig");
 const Class = @import("Class.zig");
 const Object = @import("Object.zig");
+const Client = @import("Client.zig");
 const zany = @import("../zany.zig");
 const zanylua = @import("../lua.zig");
 const globals = @import("../globals.zig");
@@ -120,7 +121,7 @@ fn index(screen: *Screen) usize {
 
 pub fn count(state: *lua.Lua) i32 {
     state.pushInteger(@intCast(globals.screens.items.len));
-    return 0;
+    return 1;
 }
 pub fn viewports(state: *lua.Lua) i32 {
     _ = state;
@@ -193,14 +194,97 @@ pub fn call(state: *lua.Lua) i32 {
     }
     return 1;
 }
+
+/// Add a fake screen.
+///
+/// To vertically split the first screen in 2 equal parts, use:
+///
+///    local geo = screen[1].geometry
+///    local new_width = math.ceil(geo.width/2)
+///    local new_width2 = geo.width - new_width
+///    screen[1]:fake_resize(geo.x, geo.y, new_width, geo.height)
+///    screen.fake_add(geo.x + new_width, geo.y, new_width2, geo.height)
+///
+/// Both virtual screens will have their own taglist and wibars.
+///
+/// @tparam integer x X-coordinate for screen.
+/// @tparam integer y Y-coordinate for screen.
+/// @tparam integer width width for screen.
+/// @tparam integer height height for screen.
+/// @return The new screen.
+/// @function fake_add
 pub fn fakeAdd(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("screen.fake_add not implemented", .{});
-    return 0;
+    const x = state.checkInteger(1);
+    const y = state.checkInteger(2);
+    const width = state.checkInteger(3);
+    const height = state.checkInteger(4);
+
+    const s = add(state) catch {
+        log.err("OOM: Unable to fake add a screen", .{});
+        std.process.exit(242);
+    } orelse unreachable;
+
+    s.geometry.x = @intCast(x);
+    s.geometry.y = @intCast(y);
+    s.geometry.width = @intCast(width);
+    s.geometry.height = @intCast(height);
+    s.xid = .fake;
+
+    s.markAdded(state);
+    screen_class.signals.emit(state, "list", 0);
+    _ = Object.push(state, s);
+
+    return 1;
 }
+
+fn markAdded(screen: *Screen, state: *lua.Lua) void {
+    screen.workarea = screen.geometry;
+    screen.valid = true;
+    _ = Object.push(state, screen);
+    Object.emitSignal(state, -1, "added", 0);
+    state.pop(1);
+}
+// Called when a screen is removed, removes references to the old screen */
+fn removed(screen: *Screen, state: *lua.Lua, sidx: i32) void {
+    Object.emitSignal(state, sidx, "removed", 0);
+
+    if (globals.primary_screen == screen)
+        globals.primary_screen = null;
+
+    for (globals.clients.items) |c| {
+        if (c.screen == screen) {
+            const new_screen = Screen.getByCoord(c.geometry.x, c.geometry.y) orelse {
+                log.err("Unable to get new screen after screen removed", .{});
+                return;
+            };
+            new_screen.moveClientTo(c, state, false);
+        }
+    }
+}
+
+/// Remove a screen.
+/// @function fake_remove
 pub fn fakeRemove(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("screen meta fake_remove not implemented", .{});
+    const obj = screen_class.checkudata(state, 1) orelse unreachable;
+    const screen: *Screen = @fieldParentPtr("obj", obj);
+    const idx = screen.index() - 1;
+    if (idx < 0)
+        // WTF?
+        return 0;
+
+    if (globals.screens.items.len == 1) {
+        zanylua.warn(state, "Removing last screen through fake_remove(). " ++
+            "This is a very, very, very bad idea!", .{});
+    }
+
+    _ = globals.screens.orderedRemove(idx);
+    _ = Object.push(state, screen);
+    screen.removed(state, -1);
+    state.pop(1);
+    screen_class.signals.emit(state, "list", 0);
+    Object.unref(state, screen);
+    screen.valid = false;
+
     return 0;
 }
 pub fn fakeResize(state: *lua.Lua) i32 {
@@ -237,10 +321,8 @@ pub fn getManaged(state: *lua.Lua, obj: *Object) i32 {
     return 0;
 }
 pub fn getWorkarea(state: *lua.Lua, obj: *Object) i32 {
-    _ = state;
-    _ = obj;
-    std.debug.panic("screen.workarea not implemented", .{});
-    return 0;
+    const screen: *Screen = @fieldParentPtr("obj", obj);
+    return screen.workarea.push(state);
 }
 pub fn getName(state: *lua.Lua, obj: *Object) i32 {
     _ = state;
@@ -431,4 +513,95 @@ pub fn updateWorkarea(screen: *Screen) void {
     // luaA_pusharea(L, old_workarea);
     // luaA_object_emit_signal(L, -2, "property::workarea", 1);
     // lua_pop(L, 1);
+}
+
+/// Move a client to a virtual screen.
+/// \param c The client to move.
+/// \param new_screen The destination screen.
+/// \param doresize Set to true if we also move the client to the new x and
+///        y of the new screen.
+///
+/// From: screen_client_moveto
+pub fn moveClientTo(screen: *Screen, c: *Client, state: *lua.Lua, doresize: bool) void {
+    const old_screen = c.screen;
+    var had_focus = false;
+
+    if (screen == c.screen)
+        return;
+
+    if (globals.focus.client == c)
+        had_focus = true;
+
+    c.screen = screen;
+
+    if (!doresize) {
+        _ = Object.push(state, c);
+        if (old_screen) |s| {
+            _ = Object.push(state, s);
+        } else {
+            state.pushNil();
+        }
+        Object.emitSignal(state, -2, "property::screen", 1);
+        state.pop(1);
+        if (had_focus) {
+            c.focus();
+        }
+        return;
+    }
+
+    const from = old_screen.?.geometry;
+    const to = c.screen.?.geometry;
+
+    var new_geometry = c.geometry;
+
+    new_geometry.x = to.x + new_geometry.x - from.x;
+    new_geometry.y = to.y + new_geometry.y - from.y;
+
+    // resize the client if it doesn't fit the new screen */
+    if (new_geometry.width > to.width)
+        new_geometry.width = to.width;
+    if (new_geometry.height > to.height)
+        new_geometry.height = to.height;
+
+    // make sure the client is still on the screen */
+    if (new_geometry.x + @as(i32, @intCast(new_geometry.width)) > to.x + @as(i32, @intCast(to.width)))
+        new_geometry.x = to.x + @as(i32, @intCast(to.width - new_geometry.width));
+    if (new_geometry.y + @as(i32, @intCast(new_geometry.height)) > to.y + @as(i32, @intCast(to.height)))
+        new_geometry.y = to.y + @as(i32, @intCast(to.height - new_geometry.height));
+    if (!screen.includesArea(new_geometry)) {
+        // If all else fails, force the client to end up on screen. */
+        new_geometry.x = to.x;
+        new_geometry.y = to.y;
+    }
+
+    // move / resize the client */
+    _ = c.resize(new_geometry, false);
+
+    // emit signal */
+    _ = Object.push(state, c);
+    if (old_screen != null) {
+        _ = Object.push(state, old_screen.?);
+    } else {
+        state.pushNil();
+    }
+    Object.emitSignal(state, -2, "property::screen", 1);
+    state.pop(1);
+
+    if (had_focus)
+        c.focus();
+}
+
+/// Is there any overlap between the given geometry and a given screen?
+/// \param screen The logical screen number.
+/// \param geom The geometry
+/// \return True if there is any overlap between the geometry and a given screen.
+///
+/// From: screen_area_in_screen
+pub fn includesArea(s: *Screen, geom: Area) bool {
+    // zig fmt: off
+    return (geom.x < s.geometry.x + @as(i32, @intCast(s.geometry.width)))
+           and (geom.x + @as(i32, @intCast(geom.width)) > s.geometry.x )
+           and (geom.y < s.geometry.y + @as(i32, @intCast(s.geometry.height)))
+           and (geom.y + @as(i32, @intCast(geom.height)) > s.geometry.y);
+    // zig fmt: on
 }

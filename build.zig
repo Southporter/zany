@@ -86,16 +86,18 @@ pub fn build(b: *std.Build) void {
     mod.linkSystemLibrary("gdk-pixbuf-2.0", .{});
     mod.linkSystemLibrary("xkbcommon", .{});
 
+    const mod_opts = std.Build.Module.CreateOptions{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zanywm", .module = mod },
+        },
+    };
+
     const exe = b.addExecutable(.{
         .name = "zany",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "zanywm", .module = mod },
-            },
-        }),
+        .root_module = b.createModule(mod_opts),
     });
 
     b.installArtifact(exe);
@@ -106,6 +108,14 @@ pub fn build(b: *std.Build) void {
     });
     const rc = b.addInstallFile(awesome.path("awesomerc.lua"), "rc.lua");
     b.getInstallStep().dependOn(&rc.step);
+
+    const check_exe = b.addExecutable(.{
+        .name = "zany_check",
+        .root_module = b.createModule(mod_opts),
+    });
+
+    const check_step = b.step("check", "Check the code via the compiler");
+    check_step.dependOn(&check_exe.step);
 
     const run_step = b.step("run", "Run the app");
 

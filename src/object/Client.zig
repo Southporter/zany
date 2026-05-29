@@ -10,9 +10,13 @@ const Class = @import("Class.zig");
 const Object = @import("Object.zig");
 const Area = @import("../common/Area.zig");
 const Hints = @import("../common/Hints.zig");
+const Drawable = @import("Drawable.zig");
 const log = std.log.scoped(.Client);
 
 const Client = @This();
+
+const max_x11_size = std.math.maxInt(u16);
+const min_x11_size = 1;
 
 // WINDOW_OBJECT_HEADER
 window: Window = .{},
@@ -104,12 +108,12 @@ pid: i32 = -1,
 // /** Value of WM_TRANSIENT_FOR */
 // xcb_window_t transient_for_window;
 // /** Titelbar information */
-// struct {
-//     /** The size of this bar. */
-//     uint16_t size;
-//     /** The drawable for this bar. */
-//     drawable_t *drawable;
-// } titlebar[CLIENT_TITLEBAR_COUNT];
+titlebar: std.EnumArray(Titlebar.Kind, Titlebar) = .init(.{
+    .top = .{},
+    .bottom = .{},
+    .right = .{},
+    .left = .{},
+}),
 // /** Motif WM hints, with an additional MWM_HINTS_AWESOME_SET bit */
 // motif_wm_hints_t motif_wm_hints;
 //
@@ -542,6 +546,28 @@ fn keys(state: *lua.Lua) i32 {
     std.debug.panic("client `keys` not implemented", .{});
     return 0;
 }
+/// Check if a client has fixed size.
+/// \param c A client.
+/// \return A boolean value, true if the client has a fixed size.
+///
+/// From: client_isfixed
+fn isfixed(c: *Client) bool {
+    // return (c.hints.flags & XCB_ICCCM_SIZE_HINT_P_MAX_SIZE
+    //         and c.size_hints.flags & XCB_ICCCM_SIZE_HINT_P_MIN_SIZE
+    //         and c.size_hints.max_width == c.size_hints.min_width
+    //         and c.size_hints.max_height == c.size_hints.min_height
+    //         and c.size_hints.max_width
+    //         and c.size_hints.max_height
+    //         and c.size_hints_honor);
+    return c.hints.max_width == c.hints.min_width and c.hints.max_height == c.hints.min_height and c.size_hints_honor;
+}
+/// Returns true if a client is tagged with one of the tags of the
+/// specified screen and is not hidden. Note that "banned" clients are included.
+/// \param c The client to check.
+/// \param screen Virtual screen number.
+/// \return true if the client is visible, false otherwise.
+///
+/// From: client_isvisible
 fn isvisible(state: *lua.Lua) i32 {
     const obj = client_class.checkudata(state, 1) orelse unreachable;
     const win: *Window = @fieldParentPtr("obj", obj);
@@ -572,10 +598,31 @@ fn handleGeometry(state: *lua.Lua) i32 {
     std.debug.panic("client `geometry` not implemented", .{});
     return 0;
 }
+
+/// Apply size hints to a size.
+///
+/// @param width Desired width of client
+/// @param height Desired height of client
+/// @return Actual width of client
+/// @return Actual height of client
+/// @function apply_size_hints
+///
+/// From: luaA_client_apply_size_hints
 fn apply_size_hints(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("client `apply_size_hints` not implemented", .{});
-    return 0;
+    const obj = client_class.checkudata(state, 1);
+    const c: *Client = from(obj.?);
+    var geometry = c.geometry;
+    if (!c.isfixed()) {
+        geometry.width = @intFromFloat(@ceil(lib.checkNumberRange(state, 2, min_x11_size, max_x11_size)));
+        geometry.height = @intFromFloat(@ceil(lib.checkNumberRange(state, 3, min_x11_size, max_x11_size)));
+    }
+
+    if (c.size_hints_honor)
+        geometry = c.applySizeHints(geometry);
+
+    state.pushInteger(geometry.width);
+    state.pushInteger(geometry.height);
+    return 2;
 }
 fn tags(state: *lua.Lua) i32 {
     _ = state;
@@ -949,10 +996,8 @@ fn get_urgent(state: *lua.Lua, obj: *Object) i32 {
     return 0;
 }
 fn set_urgent(state: *lua.Lua, obj: *Object) i32 {
-    _ = state;
     _ = obj;
-
-    std.debug.panic("client `set_urgent` not implemented", .{});
+    client_set_urgent(state, -3, lib.checkBoolean(state, -1));
     return 0;
 }
 fn get_size_hints(state: *lua.Lua, obj: *Object) i32 {
@@ -1059,4 +1104,420 @@ fn get_first_tag(state: *lua.Lua, obj: *Object) i32 {
 
     std.debug.panic("client `get_first_tag` not implemented", .{});
     return 0;
+}
+/// Give focus to client, or to first client if client is NULL.
+/// \param c The client.
+pub fn focus(client: *Client) void {
+    // We have to set focus on first client */
+    // if(!c && globalconf.clients.len && !(c = globalconf.clients.tab[0]))
+    if (globals.clients.items.len > 0 and client != globals.clients.items[0]) {
+        return;
+    }
+
+    if (client.focusUpdate()) {
+        globals.focus.need_update = true;
+    }
+}
+
+/// Record that a client got focus.
+/// \param c The client.
+/// \return true if the client focus changed, false otherwise.
+pub fn focusUpdate(client: *Client) bool {
+    const state = globals.getLuaState();
+
+    if (globals.focus.client != null and globals.focus.client != client) {
+        // When we are called due to a FocusIn event (=old focused client
+        // already unfocused), we don't want to cause a SetInputFocus,
+        // because the client which has focus now could be using globally
+        // active input model (or 'no input').
+        globals.focus.client.?.unfocusInternal();
+    }
+
+    const focused_new = globals.focus.client != client;
+    globals.focus.client = client;
+
+    // According to EWMH, we have to remove the urgent state from a client.
+    // This should be done also for the current/focused client (FS#1310). */
+    _ = Object.push(state, client);
+    client_set_urgent(state, -1, false);
+
+    if (focused_new)
+        Object.emitSignal(state, -1, "focus", 0);
+
+    state.pop(1);
+
+    return focused_new;
+}
+
+/// Unfocus a client (internal).
+/// \param c The client.
+fn unfocusInternal(client: *Client) void {
+    const state = globals.getLuaState();
+    globals.focus.client = null;
+
+    _ = Object.push(state, client);
+    Object.emitSignal(state, -1, "unfocus", 0);
+    state.pop(1);
+}
+
+/// Change the clients urgency flag.
+/// \param L The Lua VM state.
+/// \param cidx The client index on the stack.
+/// \param urgent The new flag state.
+///
+///
+fn client_set_urgent(state: *lua.Lua, cidx: i32, urgent: bool) void {
+    const obj = client_class.checkudata(state, cidx);
+    const c = from(obj.?);
+
+    if (c.urgent != urgent) {
+        c.urgent = urgent;
+
+        Object.emitSignal(state, cidx, "property::urgent", 0);
+    }
+}
+
+/// Resize client window.
+/// The sizes given as parameters are with borders!
+/// \param c Client to resize.
+/// \param geometry New window geometry.
+/// \param honor_hints Use size hints.
+/// \return true if an actual resize occurred.
+pub fn resize(c: *Client, geo: Area, honor_hints: bool) bool {
+    var geometry = geo;
+    if (honor_hints) {
+        // We could get integer underflows in client_remove_titlebar_geometry()
+        // without these checks here.
+        if (geometry.width < c.titlebar.get(.left).size + c.titlebar.get(.right).size)
+            return false;
+        if (geometry.height < c.titlebar.get(.top).size + c.titlebar.get(.bottom).size)
+            return false;
+        geometry = c.applySizeHints(geometry);
+    }
+
+    if (geometry.width < c.titlebar.get(.left).size + c.titlebar.get(.right).size)
+        return false;
+    if (geometry.height < c.titlebar.get(.top).size + c.titlebar.get(.bottom).size)
+        return false;
+
+    if (geometry.width == 0 or geometry.height == 0)
+        return false;
+
+    if (!c.geometry.eql(geometry)) {
+        c.resizeDo(geometry);
+        return true;
+    }
+
+    return false;
+}
+
+fn resizeDo(c: *Client, geometry: Area) void {
+    const state = globals.getLuaState();
+
+    var new_screen = c.screen;
+    if (!new_screen.?.includesArea(geometry))
+        new_screen = Screen.getByCoord(geometry.x, geometry.y);
+
+    // Also store geometry including border
+    const old_geometry = c.geometry;
+    c.geometry = geometry;
+
+    _ = Object.push(state, c);
+    if (!old_geometry.eql(geometry))
+        Object.emitSignal(state, -1, "property::geometry", 0);
+    if (old_geometry.x != geometry.x or old_geometry.y != geometry.y) {
+        Object.emitSignal(state, -1, "property::position", 0);
+        if (old_geometry.x != geometry.x) {
+            Object.emitSignal(state, -1, "property::x", 0);
+        } else {
+            Object.emitSignal(state, -1, "property::y", 0);
+        }
+    }
+    if (old_geometry.width != geometry.width or old_geometry.height != geometry.height) {
+        Object.emitSignal(state, -1, "property::size", 0);
+        if (old_geometry.width != geometry.width) {
+            Object.emitSignal(state, -1, "property::width", 0);
+        } else {
+            Object.emitSignal(state, -1, "property::height", 0);
+        }
+    }
+    state.pop(1);
+
+    new_screen.?.moveClientTo(c, state, false);
+
+    // Update all titlebars */
+    var iter = c.titlebar.iterator();
+    while (iter.next()) |entry| {
+        const bar = entry.value;
+        if (bar.drawable == null and bar.size == 0) {
+            continue;
+        }
+
+        _ = Object.push(state, c);
+        // was titlebar_get_drawable
+        var drawable = bar.getDrawable(entry.key, state, -1, c);
+        _ = Object.pushItem(state, -1, drawable);
+
+        // was titlebar_get_area
+        var area = bar.getArea(entry.key, c);
+
+        // Convert to global coordinates */
+        area.x += geometry.x;
+        area.y += geometry.y;
+        if (c.fullscreen) {
+            area.width = 0;
+            area.height = 0;
+        }
+        // drawable_set_geometry(L, -1, area);
+        drawable.setGeometry(state, -1, area);
+
+        // Pop the client and the drawable */
+        state.pop(2);
+    }
+}
+
+/// Apply size hints to the client's new geometry.
+///
+/// From: client_apply_size_hints
+fn applySizeHints(c: *Client, target_geo: Area) Area {
+    const minw: i32 = 0;
+    const minh: i32 = 0;
+    // var basew: i32 = 0;
+    // var baseh: i32 = 0;
+    // var real_basew: i32 = 0;
+    // var real_baseh: i32 = 0;
+    var geometry = target_geo;
+
+    if (c.fullscreen)
+        return geometry;
+
+    // Size hints are applied to the window without any decoration */
+    c.removeTitlebarGeometry(&geometry);
+
+    @breakpoint();
+    // TODO: Figure out the size hints flag
+    // if(c->size_hints.flags & XCB_ICCCM_SIZE_HINT_BASE_SIZE)
+    // {
+    //     basew = c->size_hints.base_width;
+    //     baseh = c->size_hints.base_height;
+    //     real_basew = basew;
+    //     real_baseh = baseh;
+    // }
+    // else if(c->size_hints.flags & XCB_ICCCM_SIZE_HINT_P_MIN_SIZE)
+    // {
+    //     /* base size is substituted with min size if not specified */
+    //     basew = c->size_hints.min_width;
+    //     baseh = c->size_hints.min_height;
+    // }
+    //
+    // if(c->size_hints.flags & XCB_ICCCM_SIZE_HINT_P_MIN_SIZE)
+    // {
+    //     minw = c->size_hints.min_width;
+    //     minh = c->size_hints.min_height;
+    // }
+    // else if(c->size_hints.flags & XCB_ICCCM_SIZE_HINT_BASE_SIZE)
+    // {
+    //     /* min size is substituted with base size if not specified */
+    //     minw = c->size_hints.base_width;
+    //     minh = c->size_hints.base_height;
+    // }
+    //
+    // /* Handle the size aspect ratio */
+    // if(c->size_hints.flags & XCB_ICCCM_SIZE_HINT_P_ASPECT
+    //         && c->size_hints.min_aspect_den > 0
+    //         && c->size_hints.max_aspect_den > 0
+    //         && geometry.height > real_baseh
+    //         && geometry.width > real_basew)
+    // {
+    //     /* ICCCM mandates:
+    //      * If a base size is provided along with the aspect ratio fields, the base size should be subtracted from the
+    //      * window size prior to checking that the aspect ratio falls in range. If a base size is not provided, nothing
+    //      * should be subtracted from the window size. (The minimum size is not to be used in place of the base size for
+    //      * this purpose.)
+    //      */
+    //      double dx = geometry.width - real_basew;
+    //      double dy = geometry.height - real_baseh;
+    //      double ratio = dx / dy;
+    //      double min = c->size_hints.min_aspect_num / (double) c->size_hints.min_aspect_den;
+    //      double max = c->size_hints.max_aspect_num / (double) c->size_hints.max_aspect_den;
+    //
+    //      if(max > 0 && min > 0 && ratio > 0)
+    //      {
+    //          if(ratio < min)
+    //          {
+    //              /* dx is lower than allowed, make dy lower to compensate this (+ 0.5 to force proper rounding). */
+    //              dy = dx / min + 0.5;
+    //              geometry.width  = dx + real_basew;
+    //              geometry.height = dy + real_baseh;
+    //          } else if(ratio > max)
+    //          {
+    //              /* dx is too high, lower it (+0.5 for proper rounding) */
+    //              dx = dy * max + 0.5;
+    //              geometry.width  = dx + real_basew;
+    //              geometry.height = dy + real_baseh;
+    //          }
+    //      }
+    // }
+
+    // Handle the minimum size
+    geometry.width = @max(geometry.width, minw);
+    geometry.height = @max(geometry.height, minh);
+
+    // // Handle the maximum size */
+    // if(c->size_hints.flags & XCB_ICCCM_SIZE_HINT_P_MAX_SIZE)
+    // {
+    //     if(c->size_hints.max_width)
+    //         geometry.width = MIN(geometry.width, c->size_hints.max_width);
+    //     if(c->size_hints.max_height)
+    //         geometry.height = MIN(geometry.height, c->size_hints.max_height);
+    // }
+
+    // Handle the size increment */
+    // if(c->size_hints.flags & (XCB_ICCCM_SIZE_HINT_P_RESIZE_INC | XCB_ICCCM_SIZE_HINT_BASE_SIZE)
+    //    && c->size_hints.width_inc && c->size_hints.height_inc)
+    // {
+    //     uint16_t t1 = geometry.width, t2 = geometry.height;
+    //     unsigned_subtract(t1, basew);
+    //     unsigned_subtract(t2, baseh);
+    //     geometry.width -= t1 % c->size_hints.width_inc;
+    //     geometry.height -= t2 % c->size_hints.height_inc;
+    // }
+
+    c.addTitlebarGeometry(&geometry);
+    return geometry;
+}
+
+fn removeTitlebarGeometry(c: *Client, geometry: *Area) void {
+    geometry.x += c.titlebar.get(.left).size;
+    geometry.y += c.titlebar.get(.top).size;
+    geometry.width -= c.titlebar.get(.left).size;
+    geometry.width -= c.titlebar.get(.right).size;
+    geometry.height -= c.titlebar.get(.top).size;
+    geometry.height -= c.titlebar.get(.bottom).size;
+}
+
+fn addTitlebarGeometry(c: *Client, geometry: *Area) void {
+    geometry.x -= c.titlebar.get(.left).size;
+    geometry.y -= c.titlebar.get(.top).size;
+    geometry.width += c.titlebar.get(.left).size;
+    geometry.width += c.titlebar.get(.right).size;
+    geometry.height += c.titlebar.get(.top).size;
+    geometry.height += c.titlebar.get(.bottom).size;
+}
+
+const Titlebar = struct {
+    size: u16 = 0,
+    drawable: ?*Drawable = null,
+
+    const Kind = enum {
+        top,
+        bottom,
+        left,
+        right,
+    };
+
+    pub fn getDrawable(bar: *Titlebar, kind: Kind, state: *lua.Lua, client_idx: i32, c: *Client) *Drawable {
+        var cl_idx = client_idx;
+        if (bar.drawable == null) {
+            cl_idx = lib.absindex(state, cl_idx);
+            bar.drawable = switch (kind) {
+                .top => Drawable.allocator(state, refreshTitlebarTop, c),
+                .bottom => Drawable.allocator(state, refreshTitlebarBottom, c),
+                .left => Drawable.allocator(state, refreshTitlebarLeft, c),
+                .right => Drawable.allocator(state, refreshTitlebarRight, c),
+            };
+            _ = Object.refItem(state, cl_idx, -1);
+        }
+
+        return bar.drawable.?;
+    }
+
+    fn getArea(bar: Titlebar, kind: Kind, c: *Client) Area {
+        var result = c.geometry;
+        result.x = 0;
+        result.y = 0;
+
+        // Let's try some ascii art:
+        // ---------------------------
+        // |         Top             |
+        // |-------------------------|
+        // |L|                     |R|
+        // |e|                     |i|
+        // |f|                     |g|
+        // |t|                     |h|
+        // | |                     |t|
+        // |-------------------------|
+        // |        Bottom           |
+        // ---------------------------
+
+        k: switch (kind) {
+            .bottom => {
+                result.y = @as(i32, @intCast(c.geometry.height)) - bar.size;
+                // Mimic fallthrough
+                continue :k .top;
+            },
+            .top => {
+                result.height = bar.size;
+            },
+            .right => {
+                result.x = @as(i32, @intCast(c.geometry.width)) - bar.size;
+                // Mimic fallthrough
+                continue :k .left;
+            },
+            .left => {
+                const top = c.titlebar.get(.top);
+                result.y = top.size;
+                result.width = bar.size;
+                result.height -= top.size;
+                result.height -= c.titlebar.get(.bottom).size;
+            },
+        }
+
+        return result;
+    }
+
+    fn refreshTitlebarTop(obj: *Object) void {
+        const c = from(obj);
+        const bar = c.titlebar.get(.top);
+        const area = bar.getArea(.top, c);
+        c.refreshTitlebarPartial(bar, .top, area.x, area.y, area.width, area.height);
+    }
+    fn refreshTitlebarBottom(obj: *Object) void {
+        const c = from(obj);
+        const bar = c.titlebar.get(.bottom);
+        const area = bar.getArea(.bottom, c);
+        c.refreshTitlebarPartial(bar, .bottom, area.x, area.y, area.width, area.height);
+    }
+    fn refreshTitlebarLeft(obj: *Object) void {
+        const c = from(obj);
+        const bar = c.titlebar.get(.left);
+        const area = bar.getArea(.left, c);
+        c.refreshTitlebarPartial(bar, .left, area.x, area.y, area.width, area.height);
+    }
+    fn refreshTitlebarRight(obj: *Object) void {
+        const c = from(obj);
+        const bar = c.titlebar.get(.right);
+        const area = bar.getArea(.right, c);
+        c.refreshTitlebarPartial(bar, .right, area.x, area.y, area.width, area.height);
+    }
+};
+
+fn refreshTitlebarPartial(c: *Client, bar: Titlebar, kind: Titlebar.Kind, x: i32, y: i32, width: u32, height: u32) void {
+    if (bar.drawable == null
+        // or bar.drawable.?.pixmap == XCB_NONE
+    or !bar.drawable.?.refreshed)
+        return;
+
+    // Is the titlebar part of the area that should get redrawn? */
+    const area = bar.getArea(kind, c);
+    if (area.left() >= x + @as(i32, @intCast(width)) or area.right() <= x)
+        return;
+    if (area.top() >= y + @as(i32, @intCast(height)) or area.bottom() <= y)
+        return;
+
+    // Redraw the affected parts
+    @breakpoint();
+    // cairo_surface_flush(c->titlebar[bar].drawable->surface);
+    // xcb_copy_area(globalconf.connection, c->titlebar[bar].drawable->pixmap, c->frame_window,
+    // globalconf.gc, x - area.x, y - area.y, x, y, width, height);
 }
