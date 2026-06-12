@@ -62,8 +62,7 @@ pub fn doFunction(state: *lua.Lua, nargs: i32, nret: i32) bool {
         .args = nargs,
         .results = nret,
         .msg_handler = -nargs - 2,
-    }) catch |err| {
-        log.warn("{t}: {s}", .{ err, state.toString(-1) catch @tagName(state.typeOf(-1)) });
+    }) catch {
         //remove error func and error string
         state.pop(2);
         return false;
@@ -240,4 +239,11 @@ pub fn getOptNumberRange(state: *lua.Lua, idx: c_int, name: [:0]const u8, def: l
         return optNumberRange(state, -1, def, min, max);
     }
     return def;
+}
+
+pub fn assertStackEffect(change_in_stack: i32, original_top: i32, end_top: i32) void {
+    if (end_top - original_top != change_in_stack) {
+        log.warn("Stack effect {d} != {d}", .{ end_top - original_top, change_in_stack });
+    }
+    // std.debug.assert(end_top - original_top == change_in_stack);
 }

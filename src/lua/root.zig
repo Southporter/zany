@@ -38,7 +38,6 @@ pub const lib = [_]lua.FnReg{
 /// @function buttons
 ///
 fn buttons(state: *lua.Lua) i32 {
-    // if(lua_gettop(L) == 1)
     if (state.getTop() == 1) {
         zanylib.checkTable(state, 1);
 
@@ -86,10 +85,19 @@ fn keys(state: *lua.Lua) i32 {
         while (state.next(1)) {
             const key_raw = Object.refClass(state, -1, &Key.key_class) orelse unreachable;
             const key: *Key = @ptrCast(@alignCast(key_raw));
-            globals.keys.append(globals.gpa, key) catch unreachable;
+            globals.keys.append(globals.gpa, key) catch {
+                log.err("OOM: Failed to add global keybind: {any}", .{key});
+            };
         }
 
-        std.debug.panic("Need to implement xwindow_grabkeys for river", .{});
+        const zany = zanylib.getZany(state);
+        zany.wm.unbindAll();
+        for (globals.keys.items) |k| {
+            zany.wm.bind(k.*) catch {
+                log.err("OOM: Failed to bind key: {any}", .{k});
+            };
+        }
+
         return 1;
     }
 
@@ -171,7 +179,6 @@ fn setWallpaper(state: *lua.Lua, pattern: *c.cairo_pattern_t) bool {
 /// @function wallpaper
 ///
 fn wallpaper(state: *lua.Lua) i32 {
-    @breakpoint();
     if (state.getTop() == 1) {
         const pattern = state.toUserdata(c.cairo_pattern_t, -1) catch |err| {
             log.warn("Error getting wallpaper userdata: {t}", .{err});

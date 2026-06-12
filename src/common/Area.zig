@@ -1,5 +1,6 @@
 const Lua = @import("lua").Lua;
 const Area = @This();
+const lib = @import("../lua/lib.zig");
 x: i32 = 0,
 y: i32 = 0,
 width: u32 = 0,
@@ -10,6 +11,9 @@ height: u32 = 0,
 // \param geometry The area geometry to push.
 // \return The number of elements pushed on stack.
 pub fn push(area: Area, state: *Lua) i32 {
+    const stack_depth_start = state.getTop();
+    defer lib.assertStackEffect(1, stack_depth_start, state.getTop());
+
     state.createTable(0, 4);
     state.pushInteger(area.x);
     state.setField(-2, "x");

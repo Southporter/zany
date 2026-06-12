@@ -15,9 +15,6 @@ const log = std.log.scoped(.Client);
 
 const Client = @This();
 
-const max_x11_size = std.math.maxInt(u16);
-const min_x11_size = 1;
-
 // WINDOW_OBJECT_HEADER
 window: Window = .{},
 
@@ -358,7 +355,10 @@ fn new(state: *lua.Lua) ?*Object {
 
 fn wipe(obj: *Object) void {
     log.info("destroying client", .{});
-    globals.gpa.destroy(from(obj));
+    const client = from(obj);
+    if (client.name) |n| {
+        globals.gpa.free(n);
+    }
 }
 
 fn checker(obj: *Object) bool {
@@ -405,14 +405,11 @@ pub fn manage(state: *lua.Lua, win: *wm.Window) void {
     };
 
     // Set the right screen */
-    // screen_client_moveto(c, screen_getbycoord(win.handle.x, wgeom->y), false);
+    const screen = Screen.getByCoord(win.area.x, win.area.y);
+    screen.?.moveClientTo(client, state, false);
 
     // Store initial geometry and emits signals so we inform that geometry have
     // been set.
-    // c->geometry.x = wgeom->x;
-    // c->geometry.y = wgeom->y;
-    // c->geometry.width = wgeom->width;
-    // c->geometry.height = wgeom->height;
     client.geometry = win.area;
 
     Object.emitSignal(state, -1, "property::x", 0);
@@ -613,8 +610,8 @@ fn apply_size_hints(state: *lua.Lua) i32 {
     const c: *Client = from(obj.?);
     var geometry = c.geometry;
     if (!c.isfixed()) {
-        geometry.width = @intFromFloat(@ceil(lib.checkNumberRange(state, 2, min_x11_size, max_x11_size)));
-        geometry.height = @intFromFloat(@ceil(lib.checkNumberRange(state, 3, min_x11_size, max_x11_size)));
+        geometry.width = @intFromFloat(@ceil(lib.checkNumberRange(state, 2, Window.min_x11_size, Window.max_x11_size)));
+        geometry.height = @intFromFloat(@ceil(lib.checkNumberRange(state, 3, Window.min_x11_size, Window.max_x11_size)));
     }
 
     if (c.size_hints_honor)
@@ -1294,7 +1291,7 @@ fn applySizeHints(c: *Client, target_geo: Area) Area {
     // Size hints are applied to the window without any decoration */
     c.removeTitlebarGeometry(&geometry);
 
-    @breakpoint();
+    zanylua.warn(globals.getLuaState(), "client.applySizeHints is only partially implemented", .{});
     // TODO: Figure out the size hints flag
     // if(c->size_hints.flags & XCB_ICCCM_SIZE_HINT_BASE_SIZE)
     // {
@@ -1516,7 +1513,7 @@ fn refreshTitlebarPartial(c: *Client, bar: Titlebar, kind: Titlebar.Kind, x: i32
         return;
 
     // Redraw the affected parts
-    @breakpoint();
+    zanylua.warn(globals.getLuaState(), "Redraw unimplemented in client.refreshTitlebarPartial", .{});
     // cairo_surface_flush(c->titlebar[bar].drawable->surface);
     // xcb_copy_area(globalconf.connection, c->titlebar[bar].drawable->pixmap, c->frame_window,
     // globalconf.gc, x - area.x, y - area.y, x, y, width, height);

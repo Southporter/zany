@@ -6,6 +6,7 @@ const Lua = lua.Lua;
 const Screen = @import("object/Screen.zig");
 const Area = @import("common/Area.zig");
 const Hints = @import("common/Hints.zig");
+const Key = @import("object/Key.zig");
 const Buffer = @import("wayland/Buffer.zig");
 
 const WM = @This();
@@ -42,6 +43,7 @@ globals: struct {
     registry: *wl.Registry,
 },
 state: enum {
+    start,
     init,
     manage,
     render,
@@ -84,6 +86,59 @@ keyboard: Keyboard = .{
 gpa: std.mem.Allocator,
 
 pub fn init(wm: *WM, gpa: std.mem.Allocator) !void {
+    wm.gpa = gpa;
+    wm.seats.init();
+    wm.outputs.init();
+    wm.windows.init();
+    wm.keyboard = .{
+        .handle = undefined,
+    };
+}
+
+pub fn deinit(wm: *WM) void {
+    if (wm.state == .start) {
+        // We haven't connected and don't need to do any teardown
+        return;
+    }
+    wm.keyboard.deinit(wm.gpa);
+    {
+        var iter = wm.seats.safeIterator(.reverse);
+        while (iter.next()) |seat| {
+            seat.deinit(wm.gpa);
+            seat.link.remove();
+            wm.gpa.destroy(seat);
+        }
+    }
+    {
+        var iter = wm.windows.safeIterator(.reverse);
+        while (iter.next()) |w| {
+            w.deinit(wm.gpa);
+            w.link.remove();
+            wm.gpa.destroy(w);
+        }
+    }
+    {
+        var iter = wm.outputs.safeIterator(.reverse);
+        while (iter.next()) |o| {
+            o.handle.destroy();
+            o.link.remove();
+            wm.gpa.destroy(o);
+        }
+    }
+    wm.root_shell.node.destroy();
+    wm.root_shell.shell_surface.destroy();
+    wm.root_shell.buffer.destroy();
+    wm.root_shell.surface.destroy();
+    wm.globals.rbind.destroy();
+    wm.globals.rwm.destroy();
+    wm.globals.cursor.destroy();
+    wm.globals.shm.destroy();
+    wm.globals.compositor.destroy();
+    wm.globals.registry.destroy();
+    wm.globals.display.disconnect();
+}
+
+pub fn connect(wm: *WM) !void {
     var registy_results: RegistryResults = .{};
     errdefer registy_results.destroy();
     const display = try wl.Display.connect(null);
@@ -114,55 +169,63 @@ pub fn init(wm: *WM, gpa: std.mem.Allocator) !void {
     errdefer root_shell_surface.destroy();
     const root_shell_node = try root_shell_surface.getNode();
     errdefer root_shell_node.destroy();
-    wm.* = .{
-        .globals = .{
-            .compositor = compositor,
-            .shm = shm,
-            .rwm = rwm,
-            .rbind = rbind,
-            .display = display,
-            .registry = registry,
-            .cursor = cursor,
-            .xkb_config = xkb_config,
-        },
-        .root_shell = .{
-            .surface = root_surface,
-            .buffer = try .create(0, wm),
-            .shell_surface = root_shell_surface,
-            .node = root_shell_node,
-        },
-        .gpa = gpa,
-    };
-    xkb_config.setListener(*WM, xkbConfigListener, wm);
-    wm.seats.init();
-    wm.outputs.init();
-    wm.windows.init();
-}
 
-pub fn deinit(wm: *WM) void {
-    wm.keyboard.deinit(wm.gpa);
-    {
-        var iter = wm.seats.safeIterator(.reverse);
-        while (iter.next()) |seat| {
-            seat.deinit();
-        }
-    }
-    wm.root_shell.node.destroy();
-    wm.root_shell.shell_surface.destroy();
-    wm.root_shell.buffer.destroy();
-    wm.root_shell.surface.destroy();
-    wm.globals.rbind.destroy();
-    wm.globals.rwm.destroy();
-    wm.globals.cursor.destroy();
-    wm.globals.shm.destroy();
-    wm.globals.compositor.destroy();
-    wm.globals.registry.destroy();
-    wm.globals.display.disconnect();
+    xkb_config.setListener(*WM, xkbConfigListener, wm);
+    wm.globals = .{
+        .compositor = compositor,
+        .shm = shm,
+        .rwm = rwm,
+        .rbind = rbind,
+        .display = display,
+        .registry = registry,
+        .cursor = cursor,
+        .xkb_config = xkb_config,
+    };
+    wm.root_shell = .{
+        .surface = root_surface,
+        .buffer = try .create(0, wm),
+        .shell_surface = root_shell_surface,
+        .node = root_shell_node,
+    };
 }
 
 pub fn poll(wm: *WM) !void {
-    if (wm.globals.display.roundtrip() != .SUCCESS) {
-        return error.WaylandDispatchFailed;
+    std.debug.assert(wm.state != .start);
+    log.info("polling: {d}", .{std.time.microTimestamp()});
+    const res = wm.globals.display.roundtrip();
+    if (res != .SUCCESS) {
+        log.warn("Roundtrip failed: {t}", .{res});
+        wm.state = .crash;
+    }
+    switch (wm.state) {
+        .start => unreachable,
+        .init => {},
+        .manage => {
+            log.info("Starting manage cycle", .{});
+            wm.globals.rwm.manageFinish();
+            log.info("Finishing manage cycle", .{});
+
+            if (wm.globals.display.dispatchPending() != .SUCCESS) {
+                wm.state = .crash;
+            }
+            log.info("Finished manage cycle", .{});
+        },
+        .render => {
+            log.info("Starting render cycle", .{});
+            wm.globals.rwm.renderFinish();
+
+            if (wm.globals.display.dispatchPending() != .SUCCESS) {
+                wm.state = .crash;
+            }
+            log.info("Finishing render cycle: {d}", .{std.time.microTimestamp()});
+            wm.state = .init;
+        },
+        .crash => {
+            std.debug.panic("WM crashed. Closing.", .{});
+        },
+        .finished => {
+            @breakpoint();
+        },
     }
 }
 
@@ -175,17 +238,19 @@ fn listener(
     switch (event) {
         .unavailable => {
             log.warn("River Window Manager no longer available", .{});
+            rwm.stop();
         },
         .finished => {
+            log.info("River sent finished", .{});
             wm.state = .finished;
         },
         .manage_start => {
+            log.info("River sent manage_start", .{});
             wm.state = .manage;
-            rwm.manageFinish();
         },
         .render_start => {
+            log.info("River sent render_start", .{});
             wm.state = .render;
-            rwm.renderFinish();
         },
         .session_locked => {},
         .session_unlocked => {},
@@ -273,6 +338,27 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, res: *Regi
     }
 }
 
+pub fn bind(wm: *WM, key: Key) !void {
+    var iter = wm.seats.iterator(.forward);
+    while (iter.next()) |s| {
+        try s.keybinds.append(wm.gpa, .{
+            .handle = null,
+            .key = key,
+        });
+    }
+}
+
+pub fn unbindAll(wm: *WM) void {
+    var iter = wm.seats.iterator(.forward);
+
+    while (iter.next()) |s| {
+        for (s.keybinds.items) |kb| {
+            if (kb.handle) |handle| handle.destroy();
+        }
+        s.keybinds.clearRetainingCapacity();
+    }
+}
+
 const Seat = struct {
     handle: *river.SeatV1,
     link: wl.list.Link = .{
@@ -329,12 +415,14 @@ const Seat = struct {
     };
 
     const Keybind = struct {
-        handle: *river.XkbBindingV1,
+        handle: ?*river.XkbBindingV1,
+        key: Key,
     };
-    fn deinit(seat: Seat) void {
+    fn deinit(seat: *Seat, gpa: std.mem.Allocator) void {
         for (seat.keybinds.items) |kb| {
-            kb.handle.destroy();
+            if (kb.handle) |handle| handle.destroy();
         }
+        seat.keybinds.deinit(gpa);
         seat.keybinder.destroy();
         seat.handle.destroy();
     }
@@ -605,6 +693,13 @@ pub const Window = struct {
         .next = null,
     },
 
+    fn deinit(w: *Window, gpa: std.mem.Allocator) void {
+        if (w.title) |title| gpa.free(title);
+        if (w.app_id) |app_id| gpa.free(app_id);
+        w.node.destroy();
+        w.handle.destroy();
+    }
+
     fn listener(window: *river.WindowV1, event: river.WindowV1.Event, wm: *WM) void {
         log.debug("Got window event: {any}", .{event});
         const win = wm.findWindow(window) orelse {
@@ -647,14 +742,14 @@ pub const Window = struct {
             },
             .title => |evt| {
                 if (evt.title) |title| {
-                    win.title = std.mem.span(title);
+                    win.title = wm.gpa.dupeZ(u8, std.mem.span(title)) catch @panic("OOM: Duping window title");
                 } else {
                     win.title = null;
                 }
             },
             .app_id => |evt| {
                 if (evt.app_id) |app_id| {
-                    win.app_id = std.mem.span(app_id);
+                    win.app_id = wm.gpa.dupeZ(u8, std.mem.span(app_id)) catch @panic("OOM: Duping window app_id");
                 } else {
                     win.app_id = null;
                 }
@@ -691,7 +786,9 @@ const Keyboard = struct {
     };
 
     fn deinit(kb: *Keyboard, gpa: std.mem.Allocator) void {
-        gpa.free(kb.name);
+        if (!std.mem.eql(u8, kb.name, "")) {
+            gpa.free(kb.name);
+        }
     }
 
     fn listener(handle: *river.XkbKeyboardV1, event: river.XkbKeyboardV1.Event, wm: *WM) void {

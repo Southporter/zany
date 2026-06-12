@@ -5,6 +5,7 @@ const SIG = std.posix.SIG;
 
 const Class = @import("./object/Class.zig");
 pub const Signals = @import("./Signals.zig");
+const globals = @import("globals.zig");
 
 const Lua = lua.Lua;
 
@@ -250,7 +251,7 @@ pub fn getuservalue(state: *Lua, idx: i32) void {
 pub fn deprecate(src: std.builtin.SourceLocation, state: *Lua, repl: []const u8) void {
     log.warn("{s}: This function is deprecated and will be removed, see {s}", .{ src.fn_name, repl });
     _ = state.pushStringZ(src.fn_name);
-    //signal_object_emit(state, global_signals, "debug::deprecation", 1);
+    globals.signals.emit(state, "debug::deprecation", 1);
 }
 pub fn typeError(state: *lua.Lua, narg: i32, tname: [:0]const u8) i32 {
     const msg = state.pushFString("%s expected, got %s", .{ tname.ptr, state.typeNameIndex(narg).ptr });

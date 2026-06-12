@@ -177,6 +177,8 @@ pub fn checkudata(class: *Class, state: *lua.Lua, ud: i32) ?*Object {
 // \param L The Lua VM state.
 // \param idx The index of the object on the stack.
 pub fn get(state: *lua.Lua, offset: i32) ?*Class {
+    const stack_depth_start = state.getTop();
+    defer lib.assertStackEffect(0, stack_depth_start, state.getTop());
     const t = state.typeOf(offset);
     state.getMetatable(offset) catch return null;
     if (t == .userdata) {
@@ -222,13 +224,12 @@ fn gc(state: *lua.Lua) i32 {
     const item = state.toUserdata(Object, 1) catch unreachable;
     item.signals.signals.deinit(globals.gpa);
     // Get the object class
-    var class: *Class = get(state, 1) orelse unreachable;
-    class.instances -= 1;
+    var class: ?*Class = get(state, 1) orelse unreachable;
+    class.?.instances -= 1;
     // Call the collector function of the class, and all its parent classes */
-    // while (class) |c| : (class = class.?.parent) {
-    //     c.collector(item);
-    // }
-    class.collector(item);
+    while (class) |c| : (class = class.?.parent) {
+        c.collector(item);
+    }
     // Unset its metatable so that e.g. luaA_toudata() will no longer accept
     // this object. This is needed since other __gc methods can still use this.
     // We also make sure that `item.valid == false`.
@@ -474,7 +475,8 @@ pub fn index(state: *lua.Lua) i32 {
         _ = state.getField(-1, "data");
         return 1;
     } else if (std.mem.eql(u8, attr, data)) {
-        zanylua.deprecate(@src(), state, "Use `._private` instead of `.data`");
+        // TODO: uncomment this after updating to awseome base branch
+        // zanylua.deprecate(@src(), state, "Use `._private` instead of `.data`");
         _ = class.checkudata(state, 1);
         zanylua.getuservalue(state, 1);
         _ = state.getField(-1, "data");

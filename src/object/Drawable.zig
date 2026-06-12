@@ -57,7 +57,7 @@ pub fn allocator(state: *lua.Lua, callback: Callback, data: *anyopaque) ?*Drawab
 
 fn wipe(obj: *Object) void {
     const drawable: *Drawable = @fieldParentPtr("obj", obj);
-    globals.gpa.destroy(drawable);
+    _ = drawable;
 }
 
 fn refresh(state: *lua.Lua) i32 {
@@ -80,7 +80,7 @@ pub fn setGeometry(d: *Drawable, state: *lua.Lua, didx: c_int, geom: Area) void 
         d.unsetSurface();
     }
     if (size_changed and geom.width > 0 and geom.height > 0) {
-        @breakpoint();
+        zanylua.warn(state, "Need to handle geometry change in drawable.setGeometry", .{});
         // d->pixmap = xcb_generate_id(globalconf.connection);
         // xcb_create_pixmap(globalconf.connection, globalconf.default_depth, d->pixmap,
         //                   globalconf.screen->root, geom.width, geom.height);

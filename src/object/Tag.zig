@@ -1,10 +1,12 @@
 const std = @import("std");
 const lua = @import("lua");
+const zanylib = @import("../lua.zig");
 const lib = @import("../lua/lib.zig");
 const Class = @import("Class.zig");
 const Object = @import("Object.zig");
 const Client = @import("Client.zig");
 const globals = @import("../globals.zig");
+const log = std.log.scoped(.tags);
 
 const Tag = @This();
 obj: Object = .{},
@@ -23,6 +25,8 @@ var tag_class: Class = .{
 
 var props = [_]Class.Property{
     .{ .name = "name", .new = setName, .index = getName, .newindex = setName },
+    .{ .name = "selected", .new = setSelected, .index = getSelected, .newindex = setSelected },
+    .{ .name = "activated", .new = setActivated, .index = getActivated, .newindex = setActivated },
 };
 
 pub fn setup(state: *lua.Lua) !void {
@@ -43,7 +47,7 @@ fn new(state: *lua.Lua) ?*Object {
 
 fn wipe(obj: *Object) void {
     const tag: *Tag = @fieldParentPtr("obj", obj);
-    globals.gpa.destroy(tag);
+    if (tag.name) |n| globals.gpa.free(n);
 }
 
 // Create a new tag.
@@ -114,10 +118,10 @@ fn tagClient(state: *lua.Lua, client: *Client) void {
         Object.unref(state, tag);
         return;
     }
-    tag.clients.append(std.heap.c_allocator, client) catch return;
+    tag.clients.append(globals.gpa, client) catch return;
     // ewmh_client_update_desktop(c);
     // banning_need_update();
-    // client.screen.updateWorkarea();
+    client.screen.?.updateWorkarea(state);
     // tag.emitClientSignal(client, "tagged");
 }
 
@@ -145,9 +149,9 @@ fn setName(state: *lua.Lua, obj: *Object) i32 {
     const tag: *Tag = @fieldParentPtr("obj", obj);
 
     const buf = state.checkString(-1);
-    if (tag.name) |name| std.heap.c_allocator.free(name);
+    if (tag.name) |name| globals.gpa.free(name);
 
-    tag.name = std.heap.c_allocator.dupeZ(u8, buf) catch return 0;
+    tag.name = globals.gpa.dupeZ(u8, buf) catch return 0;
     Object.emitSignal(state, -3, "property::name", 0);
     // ewmh_update_net_desktop_names();
     return 0;
@@ -164,17 +168,103 @@ fn getName(state: *lua.Lua, obj: *Object) i32 {
     return 1;
 }
 
+/// Set the tag selection status.
+/// \param L The Lua VM state.
+/// \param tag The tag to set the selection status for.
+/// \return The number of elements pushed on stack.
+///
+/// From: luaaA_tag_set_selected
+fn setSelected(state: *lua.Lua, obj: *Object) i32 {
+    const tag: *Tag = @fieldParentPtr("obj", obj);
+    tag.view(state, -3, lib.checkBoolean(state, -1));
+    return 0;
+}
+
+fn getSelected(state: *lua.Lua, obj: *Object) i32 {
+    const tag: *Tag = @fieldParentPtr("obj", obj);
+    state.pushBoolean(tag.selected);
+    return 1;
+}
+
+/// Set the tag activated status.
+/// \param L The Lua VM state.
+/// \param tag The tag to set the activated status for.
+/// \return The number of elements pushed on stack.
+///
+/// From: luaA_tag_set_activated
+fn setActivated(state: *lua.Lua, obj: *Object) i32 {
+    const tag: *Tag = @fieldParentPtr("obj", obj);
+    const activated = lib.checkBoolean(state, -1);
+    if (activated == tag.activated)
+        return 0;
+
+    tag.activated = activated;
+    if (activated) {
+        state.pushValue(-3);
+        _ = Object.refClass(state, -1, &tag_class);
+        globals.tags.append(globals.gpa, tag) catch {
+            log.err("OOM in adding activated tag", .{});
+        };
+    } else {
+        for (globals.tags.items, 0..) |t, i| {
+            if (t == tag) {
+                _ = globals.tags.orderedRemove(i);
+                break;
+            }
+        }
+        if (tag.selected) {
+            tag.selected = false;
+            Object.emitSignal(state, -3, "property::selected", 0);
+            zanylib.warn(state, "Need to implement banning_need_update in tags.setActivated", .{});
+        }
+        Object.unref(state, tag);
+    }
+    // ewmh_update_net_numbers_of_desktop();
+    // ewmh_update_net_desktop_names();
+
+    Object.emitSignal(state, -3, "property::activated", 0);
+
+    return 0;
+}
+
+fn getActivated(state: *lua.Lua, obj: *Object) i32 {
+    const tag: *Tag = @fieldParentPtr("obj", obj);
+    state.pushBoolean(tag.activated);
+    return 1;
+}
+
+/// View or unview a tag.
+/// \param L The Lua VM state.
+/// \param udx The index of the tag on the stack.
+/// \param view Set selected or not.
+///
+fn view(tag: *Tag, state: *lua.Lua, udx: i32, in_view: bool) void {
+    std.debug.assert(state.getTop() >= @abs(udx));
+    _ = tag_class.checkudata(state, udx);
+    if (tag.selected != in_view) {
+        tag.selected = in_view;
+        // banning_need_update();
+        for (globals.screens.items) |s| {
+            s.updateWorkarea(state);
+        }
+        std.debug.assert(state.getTop() >= @abs(udx));
+        Object.emitSignal(state, udx, "property::selected", 0);
+    }
+}
+
 fn untagClient(tag: *Tag, client: *Client) void {
-    for (tag.clients.items) |c| {
+    for (tag.clients.items, 0..) |c, i| {
         if (c == client) {
             std.debug.panic("Need to finish untagClient", .{});
-            // lua_State *L = globalconf_get_lua_State();
+            const state = globals.getLuaState();
+            _ = tag.clients.orderedRemove(i);
             // client_array_take(&t->clients, i);
             // banning_need_update();
             // ewmh_client_update_desktop(c);
-            // client.screen.?.updateWorkarea();
+            client.screen.?.updateWorkarea(state);
+
             // tag_client_emit_signal(t, c, "untagged");
-            // luaA_object_unref(L, t);
+            Object.unref(state, tag);
             return;
         }
     }

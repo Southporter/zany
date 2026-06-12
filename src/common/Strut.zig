@@ -37,12 +37,12 @@ pub fn push(strut: *Strut, state: *lua.Lua) i32 {
 }
 
 pub fn load(strut: *Strut, state: *lua.Lua, idx: i32) void {
-    lib.checkTable(idx);
-    const max = std.math.maxInt(u16);
-    strut.left = @ceil(lib.getOptNumbeRange(state, idx, "left", strut.left, 0, max));
-    strut.right = @ceil(lib.getOptNumbeRange(state, idx, "right", strut.right, 0, max));
-    strut.top = @ceil(lib.getOptNumbeRange(state, idx, "top", strut.top, 0, max));
-    strut.bottom = @ceil(lib.getOptNumbeRange(state, idx, "bottom", strut.bottom, 0, max));
+    lib.checkTable(state, idx);
+    const max: f32 = @floatFromInt(std.math.maxInt(u16));
+    strut.left = @intFromFloat(@ceil(lib.getOptNumberRange(state, idx, "left", @floatFromInt(strut.left), 0, max)));
+    strut.right = @intFromFloat(@ceil(lib.getOptNumberRange(state, idx, "right", @floatFromInt(strut.right), 0, max)));
+    strut.top = @intFromFloat(@ceil(lib.getOptNumberRange(state, idx, "top", @floatFromInt(strut.top), 0, max)));
+    strut.bottom = @intFromFloat(@ceil(lib.getOptNumberRange(state, idx, "bottom", @floatFromInt(strut.bottom), 0, max)));
 }
 
 pub fn hasValue(strut: *Strut) bool {

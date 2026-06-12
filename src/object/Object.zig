@@ -177,17 +177,22 @@ fn disconnectSignalFromStack(state: *lua.Lua, oud: i32, name: [:0]const u8, ud: 
     state.remove(ud);
 }
 
-// Emit a signal.
-// @tparam string name A signal name.
-// @param[opt] ... Various arguments.
-// @function emit_signal
+/// Emit a signal.
+/// @tparam string name A signal name.
+/// @param[opt] ... Various arguments.
+/// @function emit_signal
+///
+/// From: luaA_object_emit_signal
 pub fn emitSignal(state: *lua.Lua, oud: i32, name: [:0]const u8, nargs: i32) void {
+    const stack_depth_start = state.getTop();
+    defer lib.assertStackEffect(0, stack_depth_start, state.getTop());
+
     const oud_abs = lib.absindex(state, oud);
     const class = Class.get(state, oud) orelse {
         log.warn("Could not find class at {d}", .{oud});
         return;
     };
-    log.debug("Emitting Object {s} signal: {s}", .{ class.name, name });
+    // log.debug("Emitting Object {s} signal: {s}", .{ class.name, name });
     const obj = Class.toudata(state, oud, class) orelse {
         zanylua.warn(state, "Trying to emit signal '{s}' on non-object", .{name});
         return;
@@ -216,22 +221,30 @@ pub fn emitSignal(state: *lua.Lua, oud: i32, name: [:0]const u8, nargs: i32) voi
             state.pushValue(oud_abs);
             // push all args */
             for (0..@intCast(nargs)) |_| {
-                state.pushValue(-nargs - nbfunc + offset);
+                state.pushValue(-nargs - nbfunc - 1 + offset);
             }
             // push first function */
-            state.pushValue(-nargs - nbfunc + offset);
+            state.pushValue(-nargs - nbfunc - 1 + offset);
             // remove this first function */
-            state.remove(-nargs - nbfunc - 1 + offset);
+            state.remove(-nargs - nbfunc - 2 + offset);
             _ = lib.doFunction(state, nargs + 1, 0);
         }
     }
 
     // Then emit signal on the class */
+    const top_before_push = state.getTop();
     state.pushValue(oud);
+    const top_before_insert = state.getTop();
     state.insert(-nargs - 1);
+    const top_before_class_get = state.getTop();
     if (Class.get(state, -nargs - 1)) |c| {
+        const top_before_class_emit = state.getTop();
         c.signals.emit(state, name, nargs + 1);
+        _ = top_before_class_emit;
     }
+    _ = top_before_class_get;
+    _ = top_before_push;
+    _ = top_before_insert;
 }
 fn connectSignalSimple(state: *lua.Lua) i32 {
     connectSignalFromStack(state, 1, state.checkString(2), 3);
@@ -243,6 +256,7 @@ fn disconnectSignalSimple(state: *lua.Lua) i32 {
     return 0;
 }
 
+/// From: luaA_object_emit_signal_simple
 fn emitSignalSimple(state: *lua.Lua) i32 {
     emitSignal(state, 1, state.checkString(2), state.getTop() - 2);
     return 0;
@@ -286,6 +300,9 @@ fn registryPush(state: *lua.Lua) void {
     _ = state.rawGetTable(lua.registry_index);
 }
 pub fn push(state: *lua.Lua, pointer: *anyopaque) i32 {
+    const stack_depth_start = state.getTop();
+    defer lib.assertStackEffect(1, stack_depth_start, state.getTop());
+
     registryPush(state);
     state.pushLightUserdata(pointer);
     _ = state.rawGetTable(-2);

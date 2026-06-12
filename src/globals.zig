@@ -35,3 +35,18 @@ var lua_state: struct {
 pub fn getLuaState() *lua.Lua {
     return lua_state.real_state_dont_use_directly;
 }
+
+pub fn setLuaState(state: *lua.Lua) void {
+    lua_state.real_state_dont_use_directly = state;
+}
+
+pub fn deinit() void {
+    stack.deinit(gpa);
+    keys.deinit(gpa);
+    buttons.deinit(gpa);
+    tags.deinit(gpa);
+    drawins.deinit(gpa);
+    clients.deinit(gpa);
+    screens.deinit(gpa);
+    signals.signals.deinit(gpa);
+}

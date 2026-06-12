@@ -15,6 +15,9 @@ pub const Signal = struct {
 
     // Maps to `signal_object_emit` in `luaobject.c`
     pub fn emit(signal: *Signal, state: *lua.Lua, nargs: i32) void {
+        const stack_depth_start = state.getTop();
+        defer lib.assertStackEffect(0, stack_depth_start, state.getTop());
+
         const nbfunc: i32 = @intCast(signal.funcs.items.len);
 
         state.checkStackErr(nbfunc + nargs + 1, "too much signal");
@@ -54,12 +57,15 @@ pub const Signal = struct {
 signals: std.ArrayList(Signal) = .empty,
 
 pub fn emit(signals: *Signals, state: *lua.Lua, name: []const u8, nargs: i32) void {
-    const id = utils.strhash(name);
-    for (signals.signals.items) |*signal| {
-        if (id == signal.id) {
-            signal.emit(state, nargs);
-        }
+    const sigfound = signals.findByName(name);
+    if (sigfound) |signal| {
+        const top_before_emit = state.getTop();
+        signal.emit(state, nargs);
+        const top_after_emit = state.getTop();
+        _ = top_before_emit;
+        _ = top_after_emit;
     }
+
     state.pop(nargs);
 }
 

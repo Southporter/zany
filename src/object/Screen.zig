@@ -105,7 +105,6 @@ fn wipe(obj: *Object) void {
     if (screen.name) |name| {
         globals.gpa.free(name);
     }
-    globals.gpa.destroy(screen);
 }
 /// Get a screen's index.
 /// screen_get_index
@@ -479,7 +478,10 @@ fn computeStrut(s: Strut, geo: Area, area: Area, accum: *Strut) void {
     }
 }
 
-pub fn updateWorkarea(screen: *Screen) void {
+pub fn updateWorkarea(screen: *Screen, state: *lua.Lua) void {
+    const stack_depth_start = state.getTop();
+    defer lib.assertStackEffect(0, stack_depth_start, state.getTop());
+
     var area = screen.geometry;
     var strut = Strut{};
 
@@ -505,15 +507,30 @@ pub fn updateWorkarea(screen: *Screen) void {
     if (area.eql(screen.workarea))
         return;
 
-    // const old_workarea = screen.workarea;
+    const old_workarea = screen.workarea;
     screen.workarea = area;
-    @breakpoint();
-    // lua_State *L = globalconf_get_lua_State();
-    // luaA_object_push(L, screen);
-    // luaA_pusharea(L, old_workarea);
-    // luaA_object_emit_signal(L, -2, "property::workarea", 1);
-    // lua_pop(L, 1);
+    _ = Object.push(state, screen);
+    _ = old_workarea.push(state);
+    Object.emitSignal(state, -2, "property::workarea", 1);
+    state.pop(1);
 }
+
+// test "updateWorkarea" {
+//     const state = try lua.Lua.init(std.testing.allocator);
+//     defer state.deinit();
+//
+//     const idx = screen_class.new(state);
+//     const screen_obj = screen_class.checkudata(state, idx).?;
+//     var screen: *Screen = @fieldParentPtr("obj", screen_obj);
+//     screen.geometry = .{
+//         .x = 42,
+//         .y = 42,
+//         .width = 100,
+//         .height = 100,
+//     };
+//     screen.updateWorkarea(state);
+//     try std.testing.expect(state.getTop() == 0);
+// }
 
 /// Move a client to a virtual screen.
 /// \param c The client to move.

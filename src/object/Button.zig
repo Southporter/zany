@@ -49,8 +49,7 @@ fn new(state: *lua.Lua) ?*Object {
 }
 
 fn wipe(obj: *Object) void {
-    const button: *Button = @fieldParentPtr("obj", obj);
-    globals.gpa.destroy(button);
+    _ = obj;
 }
 
 fn call(state: *lua.Lua) i32 {

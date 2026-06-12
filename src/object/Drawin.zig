@@ -170,13 +170,22 @@ fn refreshPixmap(obj: *Object) void {
 fn wipe(obj: *Object) void {
     const window: *Window = @fieldParentPtr("obj", obj);
     const drawin: *Drawin = @fieldParentPtr("window", window);
-    globals.gpa.destroy(drawin);
+    _ = drawin;
 }
 
+/// Get all drawins into a table.
+/// @treturn table A table with drawins.
+/// @function get
+///
+/// From: luaA_drawin_get
 fn get(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("drawin.get not impemented", .{});
-    return 0;
+    state.newTable();
+
+    for (globals.drawins.items, 1..) |d, i| {
+        _ = Object.push(state, d);
+        state.rawSetIndex(-2, @intCast(i));
+    }
+    return 1;
 }
 fn call(state: *lua.Lua) i32 {
     return drawin_class.new(state);
@@ -186,9 +195,6 @@ fn fromObj(obj: *Object) *Drawin {
     const win: *Window = @fieldParentPtr("obj", obj);
     return @fieldParentPtr("window", win);
 }
-
-const min_coordinate = std.math.minInt(i16);
-const max_coordinate = std.math.maxInt(i16);
 
 fn handleGeometry(state: *lua.Lua) i32 {
     const object = drawin_class.checkudata(state, 1) orelse {
@@ -200,10 +206,10 @@ fn handleGeometry(state: *lua.Lua) i32 {
     if (state.getTop() == 2) {
         lib.checkTable(state, 2);
         const wingeom = Area{
-            .x = @intFromFloat(@round(lib.getOptNumberRange(state, 2, "x", @floatFromInt(drawin.geometry.x), min_coordinate, max_coordinate))),
-            .y = @intFromFloat(@round(lib.getOptNumberRange(state, 2, "y", @floatFromInt(drawin.geometry.y), min_coordinate, max_coordinate))),
-            .width = @intFromFloat(@round(lib.getOptNumberRange(state, 2, "width", @floatFromInt(drawin.geometry.width), min_coordinate, max_coordinate))),
-            .height = @intFromFloat(@round(lib.getOptNumberRange(state, 2, "height", @floatFromInt(drawin.geometry.height), min_coordinate, max_coordinate))),
+            .x = @intFromFloat(@round(lib.getOptNumberRange(state, 2, "x", @floatFromInt(drawin.geometry.x), Window.min_x11_coordinate, Window.max_x11_coordinate))),
+            .y = @intFromFloat(@round(lib.getOptNumberRange(state, 2, "y", @floatFromInt(drawin.geometry.y), Window.min_x11_coordinate, Window.max_x11_coordinate))),
+            .width = @intFromFloat(@ceil(lib.getOptNumberRange(state, 2, "width", @floatFromInt(drawin.geometry.width), Window.min_x11_size, Window.max_x11_size))),
+            .height = @intFromFloat(@ceil(lib.getOptNumberRange(state, 2, "height", @floatFromInt(drawin.geometry.height), Window.min_x11_size, Window.max_x11_size))),
         };
 
         if (wingeom.width > 0 and wingeom.height > 0) {
@@ -242,12 +248,11 @@ fn moveResize(drawin: *Drawin, state: *lua.Lua, udx: c_int, geometry: Area) void
     if (old_geometry.height != drawin.geometry.height)
         Object.emitSignal(state, udx, "property::height", 0);
 
-    @breakpoint();
     const old_screen = Screen.getByCoord(old_geometry.x, old_geometry.y);
     const new_screen = Screen.getByCoord(drawin.geometry.x, drawin.geometry.y);
     if (old_screen != new_screen and drawin.window.strut.hasValue()) {
-        old_screen.?.updateWorkarea();
-        new_screen.?.updateWorkarea();
+        old_screen.?.updateWorkarea(state);
+        new_screen.?.updateWorkarea(state);
     }
 }
 
@@ -258,7 +263,10 @@ fn applyMoveResize(drawin: *Drawin) void {
 
     drawin.geometry_dirty = false;
 
-    @breakpoint();
+    {
+        const state = globals.getLuaState();
+        zanylua.warn(state, "Need to finish implementation in drawin.applyMoveResize", .{});
+    }
     // client_ignore_enterleave_events();
     // xcb_configure_window(globalconf.connection, w->window,
     //                      XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y
@@ -289,12 +297,13 @@ fn get_x(state: *lua.Lua, obj: *Object) i32 {
 fn set_x(state: *lua.Lua, obj: *Object) i32 {
     const window: *Window = @fieldParentPtr("obj", obj);
     const drawin: *Drawin = @fieldParentPtr("window", window);
-    const new_x = state.toInteger(1) catch {
-        log.warn("Tried to set drawin.geometry.x to non-integer: {t}", .{state.typeOf(1)});
-        return 0;
-    };
-    drawin.geometry.x = @intCast(new_x);
-    drawin.geometry_dirty = true;
+    const new_x = @ceil(lib.checkNumberRange(state, -1, Window.min_x11_coordinate, Window.max_x11_coordinate));
+    drawin.moveResize(state, -3, .{
+        .x = @intFromFloat(new_x),
+        .y = drawin.geometry.y,
+        .height = drawin.geometry.height,
+        .width = drawin.geometry.width,
+    });
     return 0;
 }
 fn get_y(state: *lua.Lua, obj: *Object) i32 {
@@ -306,12 +315,13 @@ fn get_y(state: *lua.Lua, obj: *Object) i32 {
 fn set_y(state: *lua.Lua, obj: *Object) i32 {
     const window: *Window = @fieldParentPtr("obj", obj);
     const drawin: *Drawin = @fieldParentPtr("window", window);
-    const new_y = state.toInteger(1) catch {
-        log.warn("Tried to set drawin.geometry.y to non-integer: {t}", .{state.typeOf(1)});
-        return 0;
-    };
-    drawin.geometry.y = @intCast(new_y);
-    drawin.geometry_dirty = true;
+    const new_y = @ceil(lib.checkNumberRange(state, -1, Window.min_x11_coordinate, Window.max_x11_coordinate));
+    drawin.moveResize(state, -3, .{
+        .x = drawin.geometry.x,
+        .y = @intFromFloat(new_y),
+        .height = drawin.geometry.height,
+        .width = drawin.geometry.width,
+    });
     return 0;
 }
 fn get_width(state: *lua.Lua, obj: *Object) i32 {
@@ -323,12 +333,13 @@ fn get_width(state: *lua.Lua, obj: *Object) i32 {
 fn set_width(state: *lua.Lua, obj: *Object) i32 {
     const window: *Window = @fieldParentPtr("obj", obj);
     const drawin: *Drawin = @fieldParentPtr("window", window);
-    const new_width = state.toInteger(1) catch {
-        log.warn("Tried to set drawin.geometry.width to non-integer: {t}", .{state.typeOf(1)});
-        return 0;
-    };
-    drawin.geometry.width = @intCast(new_width);
-    drawin.geometry_dirty = true;
+    const new_width = @ceil(lib.checkNumberRange(state, -1, Window.min_x11_size, Window.max_x11_size));
+    drawin.moveResize(state, -3, .{
+        .x = drawin.geometry.x,
+        .y = drawin.geometry.y,
+        .height = drawin.geometry.height,
+        .width = @intFromFloat(new_width),
+    });
     return 0;
 }
 fn get_height(state: *lua.Lua, obj: *Object) i32 {
@@ -340,12 +351,13 @@ fn get_height(state: *lua.Lua, obj: *Object) i32 {
 fn set_height(state: *lua.Lua, obj: *Object) i32 {
     const window: *Window = @fieldParentPtr("obj", obj);
     const drawin: *Drawin = @fieldParentPtr("window", window);
-    const new_height = state.toInteger(1) catch {
-        log.warn("Tried to set drawin.geometry.height to non-integer: {t}", .{state.typeOf(1)});
-        return 0;
-    };
-    drawin.geometry.height = @intCast(new_height);
-    drawin.geometry_dirty = true;
+    const new_height = @ceil(lib.checkNumberRange(state, -1, Window.min_x11_size, Window.max_x11_size));
+    drawin.moveResize(state, -3, .{
+        .x = drawin.geometry.x,
+        .y = drawin.geometry.y,
+        .width = drawin.geometry.width,
+        .height = @intFromFloat(new_height),
+    });
     return 0;
 }
 
@@ -373,6 +385,7 @@ fn set_shape_bounding(state: *lua.Lua, obj: *Object) i32 {
     const win: *Window = @fieldParentPtr("obj", obj);
     const drawin: *Drawin = @fieldParentPtr("window", win);
     drawin.applyMoveResize();
+    zanylua.warn(state, "resizing not implemented in set_shape_bounding", .{});
     //  Update the wl.Surface buffer for this drawin.
     // xwindow_set_shape(drawin->window,
     //         drawin->geometry.width + 2*drawin->border_width,
@@ -412,8 +425,7 @@ fn set_shape_clip(state: *lua.Lua, obj: *Object) i32 {
     // The drawin might have been resized to a larger size. Apply that.
     drawin.applyMoveResize();
 
-    @breakpoint();
-
+    zanylua.warn(state, "xwindow_set_shape not implemented in drawin.set_shape_clip", .{});
     // xwindow_set_shape(drawin->window, drawin->geometry.width, drawin->geometry.height,
     //         XCB_SHAPE_SK_CLIP, surf, 0);
     Object.emitSignal(state, -3, "property::shape_clip", 0);
@@ -499,7 +511,7 @@ fn set_visible(state: *lua.Lua, obj: *Object) i32 {
 
         Object.emitSignal(state, udx, "property::visible", 0);
         if (drawin.window.strut.hasValue()) {
-            Screen.updateWorkarea(Screen.getByCoord(drawin.geometry.x, drawin.geometry.y) orelse unreachable);
+            Screen.updateWorkarea(Screen.getByCoord(drawin.geometry.x, drawin.geometry.y) orelse unreachable, state);
         }
     }
     return 0;
@@ -555,7 +567,7 @@ fn map(drawin: *Drawin, state: *lua.Lua, widx: i32) void {
     // Apply any pending changes */
     drawin.applyMoveResize();
     // Activate BMA */
-    @breakpoint();
+    zanylua.warn(state, "Missing implementation inside drawin.map", .{});
     // client_ignore_enterleave_events();
     // Map the drawin */
     // xcb_map_window(globalconf.connection, drawin.window);
@@ -604,6 +616,7 @@ fn refreshPixmapPartial(drawin: *Drawin, x: i32, y: i32, w: u32, h: u32) void {
 
     // Make cairo do all pending drawing
     @breakpoint();
+    zanylua.warn(globals.getLuaState(), "Need to implement flushing and copying in `refreshPixmapPartial`", .{});
     // cairo_surface_flush(drawin->drawable->surface);
     // xcb_copy_area(globalconf.connection, drawin->drawable->pixmap,
     //               drawin->window, globalconf.gc, x, y, x, y,

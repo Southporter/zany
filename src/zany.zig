@@ -60,6 +60,7 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
     self.vm = vm;
     _ = vm.atPanic(lua.wrap(onPanic));
     zany_lib.dofunction_on_error = onError;
+    globals.setLuaState(vm);
     vm.openLibs();
     try zany_lua.fixup(vm);
     config = user_config;
@@ -134,8 +135,6 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
     // selection_setup(L);
 
     try zany_lua.initRng(vm);
-    // Request initial window/output/seat messages
-    try self.wm.poll();
 
     // Parse and run configuration file before adding the screens */
     if (config.auto_screen == .off) {
@@ -147,9 +146,6 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
         };
     }
 
-    // init screens information */
-    try self.screen_scan();
-
     // Parse and run configuration file after adding the screens */
     if (config.auto_screen == .on) {
         zany_lua.loadRc(vm, config.config) catch |err| {
@@ -157,6 +153,14 @@ pub fn init(self: *Zany, gpa: std.mem.Allocator, user_config: Config) !void {
         };
     }
 
+    // Request initial window/output/seat messages
+    try self.wm.connect();
+    log.debug("Starting first poll", .{});
+    try self.wm.poll();
+    // Try to handle the first render loop too
+    try self.wm.poll();
+    // init screens information */
+    try self.screen_scan();
     // Both screen scanning mode have this signal, it cannot be in screen_scan
     //   since the automatic screen generation don't have executed rc.lua yet.
     Screen.screen_class.signals.emit(vm, "scanned", 0);
@@ -189,6 +193,7 @@ pub fn onPanic(state: *Lua) i32 {
 pub fn deinit(zany: *Zany) void {
     zany.wm.deinit();
     zany.vm.deinit();
+    globals.deinit();
 }
 
 fn print(state: *lua.Lua) i32 {
@@ -219,7 +224,7 @@ fn print(state: *lua.Lua) i32 {
 pub fn run(zany: *Zany) !void {
     zany.state = .running;
     log.info("Starting run loop", .{});
-    while (zany.state != .running) {
+    while (zany.state == .running) {
         log.info("Run loop", .{});
         zany.wm.poll() catch |err| {
             log.err("Window Manager encountered an error: {t}", .{err});
@@ -711,4 +716,8 @@ fn onError(state: *lua.Lua) i32 {
     state.insert(-2);
     state.concat(3);
     return 1;
+}
+
+test {
+    _ = @import("object/Screen.zig");
 }

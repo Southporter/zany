@@ -13,6 +13,10 @@ const wm = @import("../WindowManager.zig");
 const Window = @This();
 
 pub const none = std.math.maxInt(u32);
+pub const max_x11_size = std.math.maxInt(u16);
+pub const min_x11_size = 1;
+pub const max_x11_coordinate = std.math.maxInt(i16);
+pub const min_x11_coordinate = std.math.minInt(i16);
 
 obj: Object = .{},
 //  The River window number
@@ -102,13 +106,29 @@ fn new(state: *lua.Lua) ?*Object {
 
 fn wipe(obj: *Object) void {
     const window: *Window = @fieldParentPtr("obj", obj);
-    globals.gpa.destroy(window);
+    _ = window;
 }
 
+/// Return window struts (reserved space at the edge of the screen).
+/// \param L The Lua VM state.
+/// \return The number of elements pushed on stack.
+///
+/// From: luaA_window_struts
 fn struts(state: *lua.Lua) i32 {
-    _ = state;
-    std.debug.panic("window.struts not implemented", .{});
-    return 0;
+    const obj = window_class.checkudata(state, 1) orelse return 0;
+    const win: *Window = @fieldParentPtr("obj", obj);
+
+    if (state.getTop() == 2) {
+        win.strut.load(state, 2);
+        // ewmh_update_strut(window->window, &window->strut);
+        Object.emitSignal(state, 1, "property::struts", 0);
+        // We don't know the correct screen, update them all
+        for (globals.screens.items) |s| {
+            s.updateWorkarea(state);
+        }
+    }
+
+    return win.strut.push(state);
 }
 fn handleButtons(state: *lua.Lua) i32 {
     _ = state;
